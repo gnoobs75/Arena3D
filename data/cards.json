@@ -1,0 +1,2204 @@
+[
+  {
+    "character": "Brute",
+    "name": "Oblivious",
+    "Number in Deck": 2,
+    "type": "Response",
+    "description": "Before the Brute receives damage, reduce the next damage done to the Brute to 1.",
+    "cost": 0,
+    "image": "Oblivious.png",
+    "target": "self",
+    "effect": [
+      {"type": "buff", "name": "damageReduction", "value": 1, "duration": "thisTurn"}
+    ],
+    "trigger": "beforeDamage",
+    "requiresAlive": true,
+    "stackable": false
+  },
+  {
+    "character": "Brute",
+    "name": "Nap Time",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Restore 3 health to the Brute. He cannot attack this turn.",
+    "cost": 0,
+    "image": "NapTime.png",
+    "target": "self",
+    "effect": [
+      {"type": "heal", "value": 3},
+      {"type": "debuff", "name": "canAttack", "value": false, "duration": "thisTurn"}
+    ],
+    "effectOrder": [0, 1],
+    "requiresAlive": true
+  },
+  {
+    "character": "Brute",
+    "name": "Friends Forever",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Gain 1 Power for each enemy in range.",
+    "cost": 1,
+    "image": "FriendsForever.png",
+    "target": "self",
+    "effect": [
+      {"type": "statMod", "stat": "power", "value": 1, "duration": "thisTurn", "condition": {"scale": "enemiesInRange"}}
+    ],
+    "requiresAlive": true
+  },
+  {
+    "character": "Brute",
+    "name": "Tantrum",
+    "Number in Deck": 2,
+    "type": "Response",
+    "description": "After the Brute receives damage, deal 2 damage back to the enemy champion.",
+    "cost": 1,
+    "image": "Tantrum.png",
+    "target": "enemy",
+    "effect": [
+      {"type": "damage", "value": 2}
+    ],
+    "trigger": "afterDamage",
+    "requiresAlive": true
+  },
+  {
+    "character": "Brute",
+    "name": "Heave",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Throw any champion in range over a wall in line of sight. They must land in the first empty position on the other side.",
+    "cost": 1,
+    "image": "Heave.png",
+    "target": "enemy",
+    "effect": [
+      {"type": "move", "value": "overWall"}
+    ],
+    "range": "LOS",
+    "requiresAlive": true
+  },
+  {
+    "character": "Brute",
+    "name": "Ground Pound",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Deal 2 damage to all champions in line of sight in one direction.",
+    "cost": 2,
+    "image": "GroundPound.png",
+    "target": "direction",
+    "effect": [
+      {"type": "damage", "value": 2, "scope": "all"}
+    ],
+    "range": "LOS",
+    "requiresAlive": true
+  },
+  {
+    "character": "Brute",
+    "name": "Big Hug",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Target enemy champion cannot move next turn.",
+    "cost": 2,
+    "image": "BigHug.png",
+    "target": "enemy",
+    "effect": [
+      {"type": "debuff", "name": "canMove", "value": false, "duration": "nextTurn"}
+    ],
+    "requiresAlive": true
+  },
+  {
+    "character": "Brute",
+    "name": "No Bullying",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Move target enemy champion to one of the map’s four corners. The corner must be empty.",
+    "cost": 3,
+    "image": "NoBullying.png",
+    "target": "enemy",
+    "effect": [
+      {"type": "move", "value": "corner"}
+    ],
+    "requiresAlive": true
+  },
+  {
+    "character": "Brute",
+    "name": "Endless Energy",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "The Brute gains an extra movement and attack this turn.",
+    "cost": 1,
+    "image": "EndlessEnergy.png",
+    "target": "self",
+    "effect": [
+      {"type": "buff", "name": "extraMove", "value": true, "duration": "thisTurn"},
+      {"type": "buff", "name": "extraAttack", "value": true, "duration": "thisTurn"}
+    ],
+    "requiresAlive": true
+  },
+  {
+    "character": "Brute",
+    "name": "Encouragement",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "Target friendly champion gains +2 to all stats this turn.",
+    "cost": 2,
+    "image": "Encouragement.png",
+    "target": "friendly",
+    "effect": [
+      {"type": "statMod", "stat": "power", "value": 2, "duration": "thisTurn"},
+      {"type": "statMod", "stat": "range", "value": 2, "duration": "thisTurn"},
+      {"type": "statMod", "stat": "movementSpeed", "value": 2, "duration": "thisTurn"}
+    ],
+    "requiresAlive": true
+  },
+  {
+    "character": "Brute",
+    "name": "Shove Off",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "Push back target enemy champion until they hit a wall. Equipped items fall off.",
+    "cost": 3,
+    "image": "ShoveOff.png",
+    "target": "enemy",
+    "effect": [
+      {"type": "move", "value": "toWall"},
+      {"type": "debuff", "name": "dropEquipment", "value": true}
+    ],
+    "effectOrder": [0, 1],
+    "requiresAlive": true
+  },
+  {
+    "character": "Brute",
+    "name": "Enough is Enough",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "The Brute gains +2 Power and an extra attack this turn.",
+    "cost": 4,
+    "image": "EnoughIsEnough.png",
+    "target": "self",
+    "effect": [
+      {"type": "statMod", "stat": "power", "value": 2, "duration": "thisTurn"},
+      {"type": "buff", "name": "extraAttack", "value": true, "duration": "thisTurn"}
+    ],
+    "requiresAlive": true
+  },
+  {
+    "character": "Ranger",
+    "name": "Elusive",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "The Ranger gains an extra movement phase this turn.",
+    "cost": 0,
+    "image": "Elusive.png",
+    "target": "self",
+    "effect": [
+      {"type": "buff", "name": "extraMove", "value": true, "duration": "thisTurn"}
+    ],
+    "requiresAlive": true
+  },
+  {
+    "character": "Ranger",
+    "name": "Swiftness",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "The Ranger gains +5 movement and -5 range this turn.",
+    "cost": 0,
+    "image": "Swiftness.png",
+    "target": "self",
+    "effect": [
+      {"type": "statMod", "stat": "movementSpeed", "value": 5, "duration": "thisTurn"},
+      {"type": "statMod", "stat": "range", "value": -5, "duration": "thisTurn"}
+    ],
+    "requiresAlive": true
+  },
+  {
+    "character": "Ranger",
+    "name": "Power Shot",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "The Ranger gains +2 power and -2 range this turn.",
+    "cost": 1,
+    "image": "PowerShot.png",
+    "target": "self",
+    "effect": [
+      {"type": "statMod", "stat": "power", "value": 2, "duration": "thisTurn"},
+      {"type": "statMod", "stat": "range", "value": -2, "duration": "thisTurn"}
+    ],
+    "requiresAlive": true
+  },
+  {
+    "character": "Ranger",
+    "name": "Bear Trap",
+    "Number in Deck": 2,
+    "type": "Response",
+    "description": "When an enemy champion moves into melee range, deal 2 damage to them.",
+    "cost": 1,
+    "image": "BearTrap.png",
+    "target": "enemy",
+    "effect": [
+      {"type": "damage", "value": 2}
+    ],
+    "range": 1,
+    "trigger": "onMove",
+    "requiresAlive": true
+  },
+  {
+    "character": "Ranger",
+    "name": "Resourceful",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "At any time, put a 0 or 1 cost Ranger spell from your discard pile into your hand.",
+    "cost": 1,
+    "image": "Resourceful.png",
+    "target": "none",
+    "effect": [
+      {"type": "draw", "value": 1, "condition": {"filter": "Ranger", "maxCost": 1, "from": "discard"}}
+    ],
+    "targetSelection": "player"
+  },
+  {
+    "character": "Ranger",
+    "name": "Rain of Arrows",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Target a position. Deal 4 damage distributed randomly to all champions in AOE range.",
+    "cost": 2,
+    "image": "RainOfArrows.png",
+    "target": "position",
+    "effect": [
+      {"type": "damage", "value": 4, "scope": "random", "range": "AOE"}
+    ],
+    "range": "AOE",
+    "targetSelection": "random",
+    "requiresAlive": true
+  },
+  {
+    "character": "Ranger",
+    "name": "Multi-Shot",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Deal 2 damage to each enemy champion in range.",
+    "cost": 2,
+    "image": "MultiShot.png",
+    "target": "none",
+    "effect": [
+      {"type": "damage", "value": 2, "scope": "enemies"}
+    ],
+    "range": "self",
+    "requiresAlive": true
+  },
+  {
+    "character": "Ranger",
+    "name": "Rapid Fire",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Draw and reveal 3 cards. You may play one Ranger card for free this turn.",
+    "cost": 3,
+    "image": "RapidFire.png",
+    "target": "none",
+    "effect": [
+      {"type": "draw", "value": 3},
+      {"type": "buff", "name": "freeRangerCard", "value": true, "duration": "thisTurn"}
+    ],
+    "effectOrder": [0, 1],
+    "targetSelection": "player"
+  },
+  {
+    "character": "Ranger",
+    "name": "Leech",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "Each time the Ranger deals damage this turn, restore 1 health to the Ranger.",
+    "cost": 1,
+    "image": "Leech.png",
+    "target": "self",
+    "effect": [
+      {"type": "buff", "name": "leech", "value": true, "duration": "thisTurn"}
+    ],
+    "requiresAlive": true
+  },
+  {
+    "character": "Ranger",
+    "name": "Focus Shot",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "The Ranger cannot move this turn. Gain +3 power.",
+    "cost": 2,
+    "image": "FocusShot.png",
+    "target": "self",
+    "effect": [
+      {"type": "debuff", "name": "canMove", "value": false, "duration": "thisTurn"},
+      {"type": "statMod", "stat": "power", "value": 3, "duration": "thisTurn"}
+    ],
+    "effectOrder": [0, 1],
+    "requiresAlive": true
+  },
+  {
+    "character": "Ranger",
+    "name": "Two for One",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "The Ranger gains +2 power and an extra attack this turn.",
+    "cost": 3,
+    "image": "TwoForOne.png",
+    "target": "self",
+    "effect": [
+      {"type": "statMod", "stat": "power", "value": 2, "duration": "thisTurn"},
+      {"type": "buff", "name": "extraAttack", "value": true, "duration": "thisTurn"}
+    ],
+    "requiresAlive": true
+  },
+  {
+    "character": "Ranger",
+    "name": "From the Sky",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "Discard any number of cards. For each, deal 2 damage to a random enemy champion.",
+    "cost": 4,
+    "image": "FromTheSky.png",
+    "target": "none",
+    "effect": [
+      {"type": "discard", "value": "any"},
+      {"type": "damage", "value": 2, "scope": "randomEnemy", "condition": {"scale": "discarded"}}
+    ],
+    "effectOrder": [0, 1],
+    "targetSelection": "random",
+    "requiresAlive": true
+  },
+  {
+    "character": "Beast",
+    "name": "Quick Instincts",
+    "Number in Deck": 2,
+    "type": "Response",
+    "description": "Before combat damage is dealt, the Beast gains +2 movement and an immediate movement phase.",
+    "cost": 0,
+    "image": "QuickInstincts.png",
+    "target": "self",
+    "effect": [
+      {"type": "statMod", "stat": "movementSpeed", "value": 2, "duration": "thisTurn"},
+      {"type": "move", "value": "immediate"}
+    ],
+    "trigger": "beforeDamage",
+    "effectOrder": [0, 1],
+    "requiresAlive": true
+  },
+  {
+    "character": "Beast",
+    "name": "Natures Wrath",
+    "Number in Deck": 2,
+    "type": "Response",
+    "description": "At the end of your opponent’s turn, deal 2 damage to a random enemy if the Beast took damage this turn.",
+    "cost": 0,
+    "image": "NaturesWrath.png",
+    "target": "none",
+    "effect": [
+      {"type": "damage", "value": 2, "scope": "randomEnemy"}
+    ],
+    "trigger": "endTurn",
+    "applyWhen": "endTurn",
+    "condition": {"ifDamaged": true},
+    "targetSelection": "random",
+    "requiresAlive": true
+  },
+  {
+    "character": "Beast",
+    "name": "Bear Tank",
+    "Number in Deck": 2,
+    "type": "Response",
+    "description": "Before damage is dealt to a friendly champion in line of sight, the Beast moves to an adjacent position and receives 1 damage instead.",
+    "cost": 1,
+    "image": "BearTank.png",
+    "target": "friendly",
+    "effect": [
+      {"type": "move", "value": "adjacent"},
+      {"type": "damage", "value": 1, "target": "self"}
+    ],
+    "range": "LOS",
+    "trigger": "beforeDamage",
+    "effectOrder": [0, 1],
+    "requiresAlive": true
+  },
+  {
+    "character": "Beast",
+    "name": "Elk Restoration",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "The Beast gains +3 range. When he deals combat damage, all friendly champions in range restore 2 health.",
+    "cost": 1,
+    "image": "ElkRestoration.png",
+    "target": "self",
+    "effect": [
+      {"type": "statMod", "stat": "range", "value": 3, "duration": "thisTurn"},
+      {"type": "buff", "name": "elkRestoration", "value": true, "duration": "thisTurn"}
+    ],
+    "requiresAlive": true
+  },
+  {
+    "character": "Beast",
+    "name": "Ape Smash",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "The Beast gains +1 power. When he deals combat damage, other enemies in range of the Beast take 1 damage.",
+    "cost": 1,
+    "image": "ApeSmash.png",
+    "target": "self",
+    "effect": [
+      {"type": "statMod", "stat": "power", "value": 1, "duration": "thisTurn"},
+      {"type": "buff", "name": "apeSmash", "value": true, "duration": "thisTurn"}
+    ],
+    "requiresAlive": true
+  },
+  {
+    "character": "Beast",
+    "name": "Natures Gift",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Search your deck for one Bear card, one Elk card, and one Ape card. Reveal them to your opponent.",
+    "cost": 2,
+    "image": "NaturesGift.png",
+    "target": "none",
+    "effect": [
+      {"type": "draw", "value": 1, "condition": {"filter": "Bear"}},
+      {"type": "draw", "value": 1, "condition": {"filter": "Elk"}},
+      {"type": "draw", "value": 1, "condition": {"filter": "Ape"}}
+    ],
+    "effectOrder": [0, 1, 2],
+    "targetSelection": "player"
+  },
+  {
+    "character": "Beast",
+    "name": "Natures Resilience",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Until your next turn, all damage done to friendly champions is reduced to 1.",
+    "cost": 2,
+    "image": "NaturesResilience.png",
+    "target": "none",
+    "effect": [
+      {"type": "buff", "name": "damageReduction", "value": true, "duration": "nextTurn", "scope": "friendlies"}
+    ],
+    "range": "global",
+    "stackable": false
+  },
+  {
+    "character": "Beast",
+    "name": "Versatility",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "The Beast gains +3 to any one stat.",
+    "cost": 3,
+    "image": "Versatility.png",
+    "target": "self",
+    "effect": [
+      {"type": "statMod", "stat": "random", "value": 3, "duration": "thisTurn"}
+    ],
+    "targetSelection": "player",
+    "requiresAlive": true
+  },
+  {
+    "character": "Beast",
+    "name": "Bear Intimidation",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "During your turn, all enemies in AOE range gain an immediate movement phase that you control.",
+    "cost": 1,
+    "image": "BearIntimidation.png",
+    "target": "none",
+    "effect": [
+      {"type": "move", "value": "immediate", "scope": "enemies"}
+    ],
+    "range": "AOE",
+    "targetSelection": "player",
+    "requiresAlive": true
+  },
+  {
+    "character": "Beast",
+    "name": "Ape Slam",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "Deal 3 damage to target enemy champion. They cannot move or attack next turn.",
+    "cost": 2,
+    "image": "ApeSlam.png",
+    "target": "enemy",
+    "effect": [
+      {"type": "damage", "value": 3},
+      {"type": "debuff", "name": "canMove", "value": false, "duration": "nextTurn"},
+      {"type": "debuff", "name": "canAttack", "value": false, "duration": "nextTurn"}
+    ],
+    "effectOrder": [0, 1, 2],
+    "requiresAlive": true
+  },
+  {
+    "character": "Beast",
+    "name": "Elk Infusion",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "Restore 3 health to each friendly champion.",
+    "cost": 3,
+    "image": "ElkInfusion.png",
+    "target": "none",
+    "effect": [
+      {"type": "heal", "value": 3, "scope": "friendlies"}
+    ],
+    "range": "global"
+  },
+  {
+    "character": "Beast",
+    "name": "Earth Armor",
+    "Number in Deck": 1,
+    "type": "Equipment",
+    "description": "Equip. All combat damage dealt to the Beast is reduced by 1. Unlimited charges.",
+    "cost": 4,
+    "image": "EarthArmor.png",
+    "target": "self",
+    "effect": [
+      {"type": "buff", "name": "damageReduction", "value": 1}
+    ],
+    "charges": -1,
+    "requiresAlive": true,
+    "stackable": false
+  },
+  {
+    "character": "Redeemer",
+    "name": "Fast Heal",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Restore 2 health to any friendly champion.",
+    "cost": 0,
+    "image": "FastHeal.png",
+    "target": "friendly",
+    "effect": [
+      {"type": "heal", "value": 2}
+    ]
+  },
+  {
+    "character": "Redeemer",
+    "name": "Power Shield",
+    "Number in Deck": 2,
+    "type": "Response",
+    "description": "Before damage is dealt to target friendly champion, give them a shield that prevents 2 damage until end of turn.",
+    "cost": 0,
+    "image": "PowerShield.png",
+    "target": "friendly",
+    "effect": [
+      {"type": "buff", "name": "shield", "value": 2, "duration": "thisTurn"}
+    ],
+    "trigger": "beforeDamage",
+    "stackable": false
+  },
+  {
+    "character": "Redeemer",
+    "name": "Inspire",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Target friendly champion gains +1 to all stats this turn.",
+    "cost": 1,
+    "image": "Inspire.png",
+    "target": "friendly",
+    "effect": [
+      {"type": "statMod", "stat": "power", "value": 1, "duration": "thisTurn"},
+      {"type": "statMod", "stat": "range", "value": 1, "duration": "thisTurn"},
+      {"type": "statMod", "stat": "movementSpeed", "value": 1, "duration": "thisTurn"}
+    ]
+  },
+  {
+    "character": "Redeemer",
+    "name": "Calming",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Target enemy champion cannot cast or attack next turn.",
+    "cost": 1,
+    "image": "Calming.png",
+    "target": "enemy",
+    "effect": [
+      {"type": "debuff", "name": "canCast", "value": false, "duration": "nextTurn"},
+      {"type": "debuff", "name": "canAttack", "value": false, "duration": "nextTurn"}
+    ]
+  },
+  {
+    "character": "Redeemer",
+    "name": "Light Speed",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "All friendly champions gain 3 movement this turn.",
+    "cost": 1,
+    "image": "LightSpeed.png",
+    "target": "none",
+    "effect": [
+      {"type": "statMod", "stat": "movementSpeed", "value": 3, "duration": "thisTurn", "scope": "friendlies"}
+    ],
+    "range": "global"
+  },
+  {
+    "character": "Redeemer",
+    "name": "Spirit Strike",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Deal 2 damage to target enemy champion and restore 2 health to the Redeemer.",
+    "cost": 2,
+    "image": "SpiritStrike.png",
+    "target": "enemy",
+    "effect": [
+      {"type": "damage", "value": 2},
+      {"type": "heal", "value": 2, "target": "self"}
+    ],
+    "effectOrder": [0, 1],
+    "requiresAlive": true
+  },
+  {
+    "character": "Redeemer",
+    "name": "Light Bomb",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Choose target position. All other champions in AOE range get knocked back until they hit a wall.",
+    "cost": 2,
+    "image": "LightBomb.png",
+    "target": "position",
+    "effect": [
+      {"type": "move", "value": "toWall", "scope": "all"}
+    ],
+    "range": "AOE",
+    "requiresAlive": true
+  },
+  {
+    "character": "Redeemer",
+    "name": "Restoration",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Restore 4 health to any friendly champion.",
+    "cost": 3,
+    "image": "Restoration.png",
+    "target": "friendly",
+    "effect": [
+      {"type": "heal", "value": 4}
+    ]
+  },
+  {
+    "character": "Redeemer",
+    "name": "Refocus",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "Put up to 2 cards from your discard pile back into your hand, and the same number of cards from your opponent’s discard pile back into their hand.",
+    "cost": 1,
+    "image": "Refocus.png",
+    "target": "none",
+    "effect": [
+      {"type": "draw", "value": 2, "condition": {"from": "discard"}},
+      {"type": "draw", "value": 2, "condition": {"from": "oppDiscard"}}
+    ],
+    "effectOrder": [0, 1],
+    "targetSelection": "player"
+  },
+  {
+    "character": "Redeemer",
+    "name": "Spirit Wall",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "At the start of your opponent’s turn, choose a position. It becomes a wall until the end of turn, and any adjacent position also becomes a wall until end of turn.",
+    "cost": 2,
+    "image": "SpiritWall.png",
+    "target": "position",
+    "effect": [
+      {"type": "buff", "name": "createWall", "value": true, "duration": "nextTurn", "scope": "adjacent"}
+    ],
+    "trigger": "startTurn",
+    "applyWhen": "startTurn",
+    "requiresAlive": true
+  },
+  {
+    "character": "Redeemer",
+    "name": "Meditation",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "Search your deck for any Redeemer card. The Redeemer cannot move this turn.",
+    "cost": 3,
+    "image": "Meditation.png",
+    "target": "self",
+    "effect": [
+      {"type": "draw", "value": 1, "condition": {"filter": "Redeemer"}},
+      {"type": "debuff", "name": "canMove", "value": false, "duration": "thisTurn"}
+    ],
+    "effectOrder": [0, 1],
+    "targetSelection": "player",
+    "requiresAlive": true
+  },
+  {
+    "character": "Redeemer",
+    "name": "Resurrection",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "At the start of your turn, a dead friendly champion swaps places with the Redeemer (position and life total) and gains a free move and attack this turn. Draw 2 cards.",
+    "cost": 4,
+    "image": "Resurrection.png",
+    "target": "friendly",
+    "effect": [
+      {"type": "custom", "name": "resurrection"},
+      {"type": "draw", "value": 2}
+    ],
+    "effectOrder": [0, 1],
+    "trigger": "startTurn",
+    "applyWhen": "startTurn",
+    "customHandler": "resurrectChampion",
+    "requiresAlive": true
+  },
+  {
+    "character": "Confessor",
+    "name": "Denial",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Your opponent cannot play cards this turn. Draw a card.",
+    "cost": 0,
+    "image": "Denial.png",
+    "target": "none",
+    "effect": [
+      {"type": "debuff", "name": "canCast", "value": false, "duration": "thisTurn", "scope": "enemies"},
+      {"type": "draw", "value": 1}
+    ],
+    "range": "global",
+    "effectOrder": [0, 1]
+  },
+  {
+    "character": "Confessor",
+    "name": "Secret Revealed",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Your opponent reveals a random card. That champion takes 2 damage.",
+    "cost": 0,
+    "image": "SecretRevealed.png",
+    "target": "none",
+    "effect": [
+      {"type": "damage", "value": 2, "scope": "revealedChamp"}
+    ],
+    "targetSelection": "random",
+    "customHandler": "revealCard"
+  },
+  {
+    "character": "Confessor",
+    "name": "Introspection",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Draw two cards and discard two cards.",
+    "cost": 1,
+    "image": "Introspection.png",
+    "target": "none",
+    "effect": [
+      {"type": "draw", "value": 2},
+      {"type": "discard", "value": 2}
+    ],
+    "effectOrder": [0, 1],
+    "targetSelection": "player"
+  },
+  {
+    "character": "Confessor",
+    "name": "Hypocrite",
+    "Number in Deck": 2,
+    "type": "Response",
+    "description": "After your opponent draws any number of extra cards, you draw the same number of cards.",
+    "cost": 1,
+    "image": "Hypocrite.png",
+    "target": "none",
+    "effect": [
+      {"type": "draw", "value": "match", "condition": {"scale": "oppDraw"}}
+    ],
+    "trigger": "onDraw"
+  },
+  {
+    "character": "Confessor",
+    "name": "Blasphemy",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Deal 2 damage to target enemy champion. When this card is discarded, it can be cast immediately for 0.",
+    "cost": 1,
+    "image": "Blasphemy.png",
+    "target": "enemy",
+    "effect": [
+      {"type": "damage", "value": 2},
+      {"type": "buff", "name": "castFromDiscard", "value": true, "conditionValue": 0}
+    ],
+    "effectOrder": [0, 1]
+  },
+  {
+    "character": "Confessor",
+    "name": "Betrayal",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Target enemy champion gains an immediate movement and attack phase that you control, using their range and power.",
+    "cost": 2,
+    "image": "Betrayal.png",
+    "target": "enemy",
+    "effect": [
+      {"type": "move", "value": "immediate"},
+      {"type": "attack", "value": "immediate"}
+    ],
+    "effectOrder": [0, 1],
+    "targetSelection": "player",
+    "requiresAlive": true
+  },
+  {
+    "character": "Confessor",
+    "name": "Life Payment",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Restore life to the Confessor equal to the number of cards in your opponent’s hand.",
+    "cost": 2,
+    "image": "LifePayment.png",
+    "target": "self",
+    "effect": [
+      {"type": "heal", "value": "oppHandSize", "condition": {"scale": "oppHand"}}
+    ],
+    "requiresAlive": true
+  },
+  {
+    "character": "Confessor",
+    "name": "Atone",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Restore 3 health to your team and deal 3 damage to your opponent’s team, distributed how you choose. When this card is discarded, it can be cast immediately for 1.",
+    "cost": 3,
+    "image": "Atone.png",
+    "target": "none",
+    "effect": [
+      {"type": "heal", "value": 3, "scope": "friendlies"},
+      {"type": "damage", "value": 3, "scope": "enemies"},
+      {"type": "buff", "name": "castFromDiscard", "value": true, "conditionValue": 1}
+    ],
+    "range": "global",
+    "effectOrder": [0, 1, 2],
+    "targetSelection": "player"
+  },
+  {
+    "character": "Confessor",
+    "name": "Conspire",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "Search your opponent’s discard pile. You may cast a 0 or 1 cost spell this turn for its cost.",
+    "cost": 1,
+    "image": "Conspire.png",
+    "target": "none",
+    "effect": [
+      {"type": "draw", "value": 1, "condition": {"from": "oppDiscard", "maxCost": 1}}
+    ],
+    "targetSelection": "player"
+  },
+  {
+    "character": "Confessor",
+    "name": "Self-Hate",
+    "Number in Deck": 1,
+    "type": "Response",
+    "description": "Before damage is dealt to the Confessor, prevent that damage and redirect it to the attacker instead.",
+    "cost": 2,
+    "image": "SelfHate.png",
+    "target": "self",
+    "effect": [
+      {"type": "buff", "name": "redirectDamage", "value": true}
+    ],
+    "trigger": "beforeDamage",
+    "requiresAlive": true,
+    "stackable": false
+  },
+  {
+    "character": "Confessor",
+    "name": "Evil Within",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "Search your deck for any two Confessor cards. Then discard a card.",
+    "cost": 3,
+    "image": "EvilWithin.png",
+    "target": "none",
+    "effect": [
+      {"type": "draw", "value": 2, "condition": {"filter": "Confessor"}},
+      {"type": "discard", "value": 1}
+    ],
+    "effectOrder": [0, 1],
+    "targetSelection": "player"
+  },
+  {
+    "character": "Confessor",
+    "name": "Repentance",
+    "Number in Deck": 1,
+    "type": "Equipment",
+    "description": "Equip. When your opponent plays a card, deal damage equal to its cost to that champion. 3 charges.",
+    "cost": 4,
+    "image": "Repentance.png",
+    "target": "self",
+    "effect": [
+      {"type": "buff", "name": "dealCostDamage", "value": true}
+    ],
+    "charges": 3,
+    "requiresAlive": true
+  },
+  {
+    "character": "Barbarian",
+    "name": "Pursuit",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "The Barbarian gains X movement and loses X life.",
+    "cost": 0,
+    "image": "Pursuit.png",
+    "animatedImage": "Pursuit.gif",
+    "target": "self",
+    "effect": [
+      {"type": "statMod", "stat": "movementSpeed", "value": "X", "duration": "thisTurn"},
+      {"type": "damage", "value": "X", "target": "self"}
+    ],
+    "conditionValue": 3,
+    "effectOrder": [0, 1],
+    "requiresAlive": true
+  },
+  {
+    "character": "Barbarian",
+    "name": "Blood Shield",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "The Barbarian cannot be the target of any spell this turn. Cast at the start of any turn.",
+    "cost": 0,
+    "image": "BloodShield.png",
+    "target": "self",
+    "effect": [
+      {"type": "buff", "name": "untouchable", "value": true, "duration": "thisTurn"}
+    ],
+    "applyWhen": "startTurn",
+    "requiresAlive": true,
+    "stackable": false
+  },
+  {
+    "character": "Barbarian",
+    "name": "Whirlwind",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Deal damage to all enemies in AOE range equal to the Barbarian’s power.",
+    "cost": 1,
+    "image": "Whirlwind.png",
+    "target": "none",
+    "effect": [
+      {"type": "damage", "value": "power", "scope": "enemies"}
+    ],
+    "range": "AOE",
+    "requiresAlive": true
+  },
+  {
+    "character": "Barbarian",
+    "name": "Over Confident",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Draw a card for each champion that took damage this turn.",
+    "cost": 1,
+    "image": "OverConfident.png",
+    "target": "none",
+    "effect": [
+      {"type": "draw", "value": "damagedChamps", "condition": {"scale": "damaged"}}
+    ]
+  },
+  {
+    "character": "Barbarian",
+    "name": "Fearless Strike",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "The Barbarian gains an extra attack and discards a random card.",
+    "cost": 1,
+    "image": "FearlessStrike.png",
+    "target": "self",
+    "effect": [
+      {"type": "buff", "name": "extraAttack", "value": true, "duration": "thisTurn"},
+      {"type": "discard", "value": 1}
+    ],
+    "effectOrder": [0, 1],
+    "targetSelection": "random",
+    "requiresAlive": true
+  },
+  {
+    "character": "Barbarian",
+    "name": "Critical Strike",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "The Barbarian has a 50% chance his next attack deals double combat damage.",
+    "cost": 2,
+    "image": "CriticalStrike.png",
+    "target": "self",
+    "effect": [
+      {"type": "buff", "name": "critical", "value": true, "duration": "thisTurn"}
+    ],
+    "condition": {"chance": 0.5},
+    "requiresAlive": true
+  },
+  {
+    "character": "Barbarian",
+    "name": "Refuel",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "At the end of your turn, restore health to the Barbarian equal to his damage done.",
+    "cost": 2,
+    "image": "Refuel.png",
+    "target": "self",
+    "effect": [
+      {"type": "buff", "name": "refuel", "value": true, "duration": "thisTurn"}
+    ],
+    "applyWhen": "endTurn",
+    "requiresAlive": true
+  },
+  {
+    "character": "Barbarian",
+    "name": "Head Smash",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Choose an enemy champion in line of sight. The Barbarian moves to an empty adjacent position and deals 3 damage.",
+    "cost": 3,
+    "image": "HeadSmash.png",
+    "target": "enemy",
+    "effect": [
+      {"type": "move", "value": "adjacent"},
+      {"type": "damage", "value": 3}
+    ],
+    "range": "LOS",
+    "effectOrder": [0, 1],
+    "requiresAlive": true
+  },
+  {
+    "character": "Barbarian",
+    "name": "Dodge",
+    "Number in Deck": 1,
+    "type": "Response",
+    "description": "Before receiving damage, the Barbarian gains an immediate movement phase.",
+    "cost": 1,
+    "image": "Dodge.png",
+    "target": "self",
+    "effect": [
+      {"type": "move", "value": "immediate"}
+    ],
+    "trigger": "beforeDamage",
+    "requiresAlive": true
+  },
+  {
+    "character": "Barbarian",
+    "name": "Cheat Death",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "The Barbarian cannot go below 1 health. Cast at the start of any turn.",
+    "cost": 2,
+    "image": "CheatDeath.png",
+    "target": "self",
+    "effect": [
+      {"type": "buff", "name": "cheatDeath", "value": true, "duration": "thisTurn"}
+    ],
+    "applyWhen": "startTurn",
+    "requiresAlive": true,
+    "stackable": false
+  },
+  {
+    "character": "Barbarian",
+    "name": "Hamstrung",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "Target enemy in line of sight cannot move next turn.",
+    "cost": 3,
+    "image": "Hamstrung.png",
+    "target": "enemy",
+    "effect": [
+      {"type": "debuff", "name": "canMove", "value": false, "duration": "nextTurn"}
+    ],
+    "range": "LOS"
+  },
+  {
+    "character": "Barbarian",
+    "name": "Enrage",
+    "Number in Deck": 1,
+    "type": "Equipment",
+    "description": "Equip. If the Barbarian is at 8 life or less, he gains +3 power. Unlimited charges.",
+    "cost": 4,
+    "image": "Enrage.png",
+    "target": "self",
+    "effect": [
+      {"type": "statMod", "stat": "power", "value": 3, "condition": {"ifLifeBelow": 8}}
+    ],
+    "charges": -1,
+    "requiresAlive": true
+  },
+  {
+    "character": "Burglar",
+    "name": "Pick Pocket",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "At the end of your opponent’s turn, steal one empty gem. You may use it on your next turn.",
+    "cost": 0,
+    "image": "PickPocket.png",
+    "target": "none",
+    "effect": [
+      {"type": "buff", "name": "stealMana", "value": 1, "duration": "nextTurn"}
+    ],
+    "applyWhen": "endTurn"
+  },
+  {
+    "character": "Burglar",
+    "name": "Quick Advantage",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "The Burglar gains unlimited movement this turn only. He cannot attack.",
+    "cost": 0,
+    "image": "QuickAdvantage.png",
+    "target": "self",
+    "effect": [
+      {"type": "buff", "name": "unlimitedMovement", "value": true, "duration": "thisTurn"},
+      {"type": "debuff", "name": "canAttack", "value": false, "duration": "thisTurn"}
+    ],
+    "requiresAlive": true
+  },
+  {
+    "character": "Burglar",
+    "name": "Surprise Attack",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "At the end of your opponent’s turn, the Burglar gains an immediate movement and attack phase.",
+    "cost": 1,
+    "image": "SurpriseAttack.png",
+    "target": "self",
+    "effect": [
+      {"type": "move", "value": "immediate"},
+      {"type": "attack", "value": "immediate"}
+    ],
+    "effectOrder": [0, 1],
+    "applyWhen": "endTurn",
+    "requiresAlive": true
+  },
+  {
+    "character": "Burglar",
+    "name": "Distract",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Move target enemy champion to an empty position in line of sight.",
+    "cost": 1,
+    "image": "Distract.png",
+    "target": "enemy",
+    "effect": [
+      {"type": "move", "value": "LOS"}
+    ],
+    "range": "LOS",
+    "targetSelection": "player"
+  },
+  {
+    "character": "Burglar",
+    "name": "Blinded",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "There is a 50% chance target enemy cannot attack next turn.",
+    "cost": 1,
+    "image": "Blinded.png",
+    "target": "enemy",
+    "effect": [
+      {"type": "debuff", "name": "canAttack", "value": false, "duration": "nextTurn"}
+    ],
+    "condition": {"chance": 0.5}
+  },
+  {
+    "character": "Burglar",
+    "name": "Vanish",
+    "Number in Deck": 2,
+    "type": "Response",
+    "description": "Before receiving combat damage, move the Burglar to any empty position that no enemy can target.",
+    "cost": 2,
+    "image": "Vanish.png",
+    "target": "self",
+    "effect": [
+      {"type": "move", "value": "safe"}
+    ],
+    "trigger": "beforeDamage",
+    "requiresAlive": true
+  },
+  {
+    "character": "Burglar",
+    "name": "Quick Hit",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Deal 3 damage to target enemy champion. 50% chance to return this card to your hand.",
+    "cost": 2,
+    "image": "QuickHit.png",
+    "target": "enemy",
+    "effect": [
+      {"type": "damage", "value": 3},
+      {"type": "buff", "name": "returnToHand", "value": true}
+    ],
+    "effectOrder": [0, 1],
+    "condition": {"chance": 0.5}
+  },
+  {
+    "character": "Burglar",
+    "name": "Safe House",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "At the end of your opponent’s turn, if the Burglar is not in any enemy’s range, restore 6 health.",
+    "cost": 3,
+    "image": "SafeHouse.png",
+    "target": "self",
+    "effect": [
+      {"type": "heal", "value": 6}
+    ],
+    "condition": {"ifNotInRange": true},
+    "applyWhen": "endTurn",
+    "requiresAlive": true
+  },
+  {
+    "character": "Burglar",
+    "name": "Jackpot",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "Anytime, gain three gems.",
+    "cost": 1,
+    "image": "Jackpot.png",
+    "target": "none",
+    "effect": [
+      {"type": "buff", "name": "gainMana", "value": 3}
+    ]
+  },
+  {
+    "character": "Burglar",
+    "name": "Breaking and Entering",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "All champions’ equipment goes to the discard pile. Shuffle all discard piles into their deck.",
+    "cost": 2,
+    "image": "BreakingAndEntering.png",
+    "target": "none",
+    "effect": [
+      {"type": "debuff", "name": "dropEquipment", "value": true, "scope": "all"},
+      {"type": "buff", "name": "shuffleDiscard", "value": true, "scope": "all"}
+    ],
+    "effectOrder": [0, 1]
+  },
+  {
+    "character": "Burglar",
+    "name": "From the Shadows",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "On your turn, any time an enemy champion is in range of the Burglar, deal 3 damage to them.",
+    "cost": 3,
+    "image": "FromTheShadows.png",
+    "target": "none",
+    "effect": [
+      {"type": "damage", "value": 3, "scope": "enemies"}
+    ],
+    "range": "self",
+    "requiresAlive": true
+  },
+  {
+    "character": "Burglar",
+    "name": "Disguise",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "The Burglar gains the stats of target enemy champion. He may cast one card of that champion from the discard pile for free.",
+    "cost": 4,
+    "image": "Disguise.png",
+    "target": "enemy",
+    "effect": [
+      {"type": "buff", "name": "copyStats", "value": true},
+      {"type": "draw", "value": 1, "condition": {"from": "oppDiscard", "matchTarget": true}}
+    ],
+    "effectOrder": [0, 1],
+    "requiresAlive": true,
+    "customHandler": "copyStats"
+  },
+  {
+    "character": "Berserker",
+    "name": "Enrage",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "The Berserker gains +2 power and loses 3 life this turn.",
+    "cost": 0,
+    "image": "Enrage.png",
+    "target": "self",
+    "effect": [
+      {"type": "statMod", "stat": "power", "value": 2, "duration": "thisTurn"},
+      {"type": "damage", "value": 3, "target": "self"}
+    ],
+    "effectOrder": [0, 1],
+    "requiresAlive": true
+  },
+  {
+    "character": "Berserker",
+    "name": "Agility",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "The Berserker can move diagonally this turn, ignoring collision with walls or champions.",
+    "cost": 0,
+    "image": "Agility.png",
+    "target": "self",
+    "effect": [
+      {"type": "buff", "name": "agility", "value": true, "duration": "thisTurn"}
+    ],
+    "requiresAlive": true
+  },
+  {
+    "character": "Berserker",
+    "name": "Commanding Shout",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Target enemy champion cannot attack next turn. Berserker loses 1 life.",
+    "cost": 1,
+    "image": "CommandingShout.png",
+    "target": "enemy",
+    "effect": [
+      {"type": "debuff", "name": "canAttack", "value": false, "duration": "nextTurn"},
+      {"type": "damage", "value": 1, "target": "self"}
+    ],
+    "effectOrder": [0, 1],
+    "requiresAlive": true
+  },
+  {
+    "character": "Berserker",
+    "name": "Bloodthirsty",
+    "Number in Deck": 2,
+    "type": "Response",
+    "description": "Before any enemy champion is healed, deal 2 damage to them.",
+    "cost": 1,
+    "image": "Bloodthirsty.png",
+    "target": "enemy",
+    "effect": [
+      {"type": "damage", "value": 2}
+    ],
+    "trigger": "onHeal"
+  },
+  {
+    "character": "Berserker",
+    "name": "Second Wind",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "If the Berserker was hit for more than 4 damage last turn, restore health equal to the damage done.",
+    "cost": 1,
+    "image": "SecondWind.png",
+    "target": "self",
+    "effect": [
+      {"type": "heal", "value": "damageTaken", "condition": {"ifDamageAbove": 4}}
+    ],
+    "requiresAlive": true
+  },
+  {
+    "character": "Berserker",
+    "name": "Throwing Axe",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "The Berserker gains -3 power and +3 range. Target enemy champion cannot move next turn. Berserker cannot attack this turn.",
+    "cost": 2,
+    "image": "ThrowingAxe.png",
+    "target": "enemy",
+    "effect": [
+      {"type": "statMod", "stat": "power", "value": -3, "duration": "thisTurn"},
+      {"type": "statMod", "stat": "range", "value": 3, "duration": "thisTurn"},
+      {"type": "debuff", "name": "canMove", "value": false, "duration": "nextTurn"},
+      {"type": "debuff", "name": "canAttack", "value": false, "duration": "thisTurn", "target": "self"}
+    ],
+    "effectOrder": [0, 1, 2, 3],
+    "requiresAlive": true
+  },
+  {
+    "character": "Berserker",
+    "name": "Dual Wield",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "50% chance for the Berserker to gain a second attack this turn.",
+    "cost": 2,
+    "image": "DualWield.png",
+    "target": "self",
+    "effect": [
+      {"type": "buff", "name": "extraAttack", "value": true, "duration": "thisTurn"}
+    ],
+    "condition": {"chance": 0.5},
+    "requiresAlive": true
+  },
+  {
+    "character": "Berserker",
+    "name": "Last Stand",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Deal 2 damage to target enemy champion. If this is your only card in hand, deal 4 damage instead.",
+    "cost": 3,
+    "image": "LastStand.png",
+    "target": "enemy",
+    "effect": [
+      {"type": "damage", "value": 2, "condition": {"ifOnlyCard": 4}}
+    ]
+  },
+  {
+    "character": "Berserker",
+    "name": "Spell Punish",
+    "Number in Deck": 1,
+    "type": "Response",
+    "description": "After being hit with spell damage, the Berserker moves to an empty adjacent position to the enemy champion who dealt the damage.",
+    "cost": 1,
+    "image": "SpellPunish.png",
+    "target": "self",
+    "effect": [
+      {"type": "move", "value": "adjacentToSource"}
+    ],
+    "trigger": "afterDamage",
+    "condition": {"ifSpell": true},
+    "requiresAlive": true
+  },
+  {
+    "character": "Berserker",
+    "name": "Battlecry",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "Discard any number of cards. For each, gain +1 to a random stat (Roll: 1-2 range, 3-4 power, 5-6 movement).",
+    "cost": 2,
+    "image": "Battlecry.png",
+    "target": "none",
+    "effect": [
+      {"type": "discard", "value": "any"},
+      {"type": "statMod", "stat": "random", "value": 1, "duration": "thisTurn", "condition": {"scale": "discarded"}}
+    ],
+    "effectOrder": [0, 1],
+    "targetSelection": "player",
+    "customHandler": "randomStat"
+  },
+  {
+    "character": "Berserker",
+    "name": "Intimidation",
+    "Number in Deck": 1,
+    "type": "Equipment",
+    "description": "Equip. When the Berserker receives combat damage, deal the same damage in return. 3 charges.",
+    "cost": 3,
+    "image": "Intimidation.png",
+    "target": "self",
+    "effect": [
+      {"type": "buff", "name": "returnDamage", "value": true}
+    ],
+    "charges": 3,
+    "requiresAlive": true
+  },
+  {
+    "character": "Berserker",
+    "name": "Mutually Assured Destruction",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "Deal 5 damage to target enemy and 5 damage to the Berserker. If this card is in your discard pile, the Berserker cannot restore health.",
+    "cost": 4,
+    "image": "MutuallyAssuredDestruction.png",
+    "target": "enemy",
+    "effect": [
+      {"type": "damage", "value": 5},
+      {"type": "damage", "value": 5, "target": "self"},
+      {"type": "debuff", "name": "noHeal", "value": true, "condition": {"ifInDiscard": true}}
+    ],
+    "effectOrder": [0, 1, 2],
+    "requiresAlive": true
+  },
+  {
+    "character": "Shaman",
+    "name": "Cloud Shift",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Return any Shaman card from your discard pile to your hand that costs 1 or less.",
+    "cost": 0,
+    "image": "CloudShift.png",
+    "target": "none",
+    "effect": [
+      {"type": "draw", "value": 1, "condition": {"filter": "Shaman", "maxCost": 1, "from": "discard"}}
+    ],
+    "targetSelection": "player"
+  },
+  {
+    "character": "Shaman",
+    "name": "Lightning Strike",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Deal 2 damage to any enemy champion.",
+    "cost": 0,
+    "image": "LightningStrike.png",
+    "target": "enemy",
+    "effect": [
+      {"type": "damage", "value": 2}
+    ]
+  },
+  {
+    "character": "Shaman",
+    "name": "Spirit Link",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Transfer 5 health between two target friendly champions.",
+    "cost": 1,
+    "image": "SpiritLink.png",
+    "target": "friendly",
+    "effect": [
+      {"type": "custom", "name": "spiritLink", "value": 5}
+    ],
+    "multiTarget": 2,
+    "customHandler": "transferHealth"
+  },
+  {
+    "character": "Shaman",
+    "name": "Revitalize",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Draw 2 cards.",
+    "cost": 1,
+    "image": "Revitalize.png",
+    "target": "none",
+    "effect": [
+      {"type": "draw", "value": 2}
+    ]
+  },
+  {
+    "character": "Shaman",
+    "name": "Vortex Shield",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Target friendly champion is immune until your next turn.",
+    "cost": 1,
+    "image": "VortexShield.png",
+    "target": "friendly",
+    "effect": [
+      {"type": "buff", "name": "immune", "value": true, "duration": "nextTurn"}
+    ],
+    "stackable": false
+  },
+  {
+    "character": "Shaman",
+    "name": "Elemental Storm",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Target any champion. Deal damage to each champion in AOE range equal to the Shaman’s power.",
+    "cost": 2,
+    "image": "ElementalStorm.png",
+    "target": "position",
+    "effect": [
+      {"type": "damage", "value": "power", "scope": "all"}
+    ],
+    "range": "AOE",
+    "requiresAlive": true
+  },
+  {
+    "character": "Shaman",
+    "name": "Healing Rain",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "Target a position. Any champions in AOE range restore 3 health.",
+    "cost": 2,
+    "image": "HealingRain.png",
+    "target": "position",
+    "effect": [
+      {"type": "heal", "value": 3, "scope": "all"}
+    ],
+    "range": "AOE"
+  },
+  {
+    "character": "Shaman",
+    "name": "Thunderous Wrath",
+    "Number in Deck": 2,
+    "type": "Action",
+    "description": "If you draw this card at the start of your turn, it costs 1 instead. Deal 3 damage to a random enemy champion.",
+    "cost": 3,
+    "image": "ThunderousWrath.png",
+    "target": "none",
+    "effect": [
+      {"type": "damage", "value": 3, "scope": "randomEnemy"}
+    ],
+    "condition": {"ifDrawnStart": {"cost": 1}},
+    "applyWhen": "drawnStart",
+    "targetSelection": "random"
+  },
+  {
+    "character": "Shaman",
+    "name": "Static Shock",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "Deal 1 or 2 damage (randomly assigned) to all champions in range, including the Shaman.",
+    "cost": 1,
+    "image": "StaticShock.png",
+    "target": "none",
+    "effect": [
+      {"type": "damage", "value": "random1or2", "scope": "all"}
+    ],
+    "range": "self",
+    "targetSelection": "random",
+    "requiresAlive": true
+  },
+  {
+    "character": "Shaman",
+    "name": "Super Charged",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "Target friendly champion gains unlimited range and movement this turn.",
+    "cost": 2,
+    "image": "SuperCharged.png",
+    "target": "friendly",
+    "effect": [
+      {"type": "buff", "name": "unlimitedRange", "value": true, "duration": "thisTurn"},
+      {"type": "buff", "name": "unlimitedMovement", "value": true, "duration": "thisTurn"}
+    ]
+  },
+  {
+    "character": "Shaman",
+    "name": "Combat Medic",
+    "Number in Deck": 1,
+    "type": "Equipment",
+    "description": "Equip. The Shaman may use his attack phase to restore health to any target friendly champion, equal to the Shaman’s power. 3 charges.",
+    "cost": 3,
+    "image": "CombatMedic.png",
+    "target": "self",
+    "effect": [
+      {"type": "buff", "name": "attackHeals", "value": "power"}
+    ],
+    "charges": 3,
+    "requiresAlive": true
+  },
+  {
+    "character": "Shaman",
+    "name": "Elemental Fury",
+    "Number in Deck": 1,
+    "type": "Action",
+    "description": "Discard your hand. Search your deck for 3 cards that cost 1 or less. The Shaman cannot attack this turn.",
+    "cost": 4,
+    "image": "ElementalFury.png",
+    "target": "none",
+    "effect": [
+      {"type": "discard", "value": "all"},
+      {"type": "draw", "value": 3, "condition": {"maxCost": 1}},
+      {"type": "debuff", "name": "canAttack", "value": false, "duration": "thisTurn"}
+    ],
+    "effectOrder": [0, 1, 2],
+    "targetSelection": "player",
+    "requiresAlive": true
+   },
+   {
+      "character": "Illusionist",
+      "name": "Pick a Card…",
+      "Number in Deck": 2,
+      "type": "Action",
+      "description": "Put a random card from your discard pile into your hand, selected by your opponent.",
+      "cost": 0,
+      "image": "PickACard.png",
+      "target": "none",
+      "effect": [
+        {"type": "draw", "value": 1, "condition": {"from": "discard", "random": true}}
+      ],
+      "targetSelection": "opponent"
+    },
+    {
+      "character": "Illusionist",
+      "name": "Now You See Me",
+      "Number in Deck": 2,
+      "type": "Response",
+      "description": "Before the Illusionist takes combat damage, roll for a 50% chance to negate the damage.",
+      "cost": 0,
+      "image": "NowYouSeeMe.png",
+      "target": "self",
+      "effect": [
+        {"type": "buff", "name": "negateDamage", "value": true}
+      ],
+      "trigger": "beforeDamage",
+      "condition": {"chance": 0.5},
+      "requiresAlive": true
+    },
+    {
+      "character": "Illusionist",
+      "name": "Intel",
+      "Number in Deck": 2,
+      "type": "Action",
+      "description": "Look at the top card of each deck. You may put it on the top or bottom.",
+      "cost": 1,
+      "image": "Intel.png",
+      "target": "none",
+      "effect": [
+        {"type": "custom", "name": "intel"}
+      ],
+      "customHandler": "manipulateDeck"
+    },
+    {
+      "character": "Illusionist",
+      "name": "Gamble",
+      "Number in Deck": 2,
+      "type": "Action",
+      "description": "50% chance to gain a mana crystal. Repeat until you lose the roll.",
+      "cost": 1,
+      "image": "Gamble.png",
+      "target": "none",
+      "effect": [
+        {"type": "buff", "name": "gainMana", "value": 1, "condition": {"repeatChance": 0.5}}
+      ],
+      "customHandler": "repeatRoll"
+    },
+    {
+      "character": "Illusionist",
+      "name": "Guess Again",
+      "Number in Deck": 2,
+      "type": "Action",
+      "description": "Until your next turn, your opponent cannot cast spells that cost X or less.",
+      "cost": 1,
+      "image": "GuessAgain.png",
+      "target": "none",
+      "effect": [
+        {"type": "debuff", "name": "maxCastCost", "value": "X", "duration": "nextTurn", "scope": "enemies"}
+      ],
+      "range": "global",
+      "conditionValue": 2
+    },
+    {
+      "character": "Illusionist",
+      "name": "Reshuffle",
+      "Number in Deck": 2,
+      "type": "Action",
+      "description": "Draw X cards.",
+      "cost": 2,
+      "image": "Reshuffle.png",
+      "target": "none",
+      "effect": [
+        {"type": "draw", "value": "X"}
+      ],
+      "conditionValue": 3
+    },
+    {
+      "character": "Illusionist",
+      "name": "Confuse",
+      "Number in Deck": 2,
+      "type": "Response",
+      "description": "On any turn, change the target of a spell from one champion to another champion.",
+      "cost": 2,
+      "image": "Confuse.png",
+      "target": "none",
+      "effect": [
+        {"type": "custom", "name": "redirectSpell"}
+      ],
+      "trigger": "onCast",
+      "customHandler": "redirectSpell",
+      "multiTarget": 2,
+      "targetSelection": "player"
+    },
+    {
+      "character": "Illusionist",
+      "name": "Grand Finale",
+      "Number in Deck": 2,
+      "type": "Action",
+      "description": "The Illusionist’s power is equal to his hand size until end of turn.",
+      "cost": 3,
+      "image": "GrandFinale.png",
+      "target": "self",
+      "effect": [
+        {"type": "statMod", "stat": "power", "value": "handSize", "duration": "thisTurn"}
+      ],
+      "requiresAlive": true
+    },
+    {
+      "character": "Illusionist",
+      "name": "Teleport",
+      "Number in Deck": 1,
+      "type": "Equipment",
+      "description": "Equip. Pay 1 gem to move target friendly champion to any empty target position. Unlimited charges.",
+      "cost": 1,
+      "image": "Teleport.png",
+      "target": "friendly",
+      "effect": [
+        {"type": "move", "value": "any", "conditionValue": 1}
+      ],
+      "charges": -1,
+      "requiresAlive": true
+    },
+    {
+      "character": "Illusionist",
+      "name": "Misdirection",
+      "Number in Deck": 1,
+      "type": "Equipment",
+      "description": "Equip. Pay 2 gems. Choose target enemy champion. Either move or attack for that champion as if they are on your team. Unlimited charges.",
+      "cost": 1,
+      "image": "Misdirection.png",
+      "target": "enemy",
+      "effect": [
+        {"type": "custom", "name": "misdirection", "conditionValue": 2}
+      ],
+      "charges": -1,
+      "customHandler": "controlEnemy",
+      "targetSelection": "player",
+      "requiresAlive": true
+    },
+    {
+      "character": "Illusionist",
+      "name": "House Odds",
+      "Number in Deck": 1,
+      "type": "Action",
+      "description": "Roll 2 dice and add them together. 2-4: Deal 4 damage to the Illusionist. 5-10: Deal 4 damage to any enemy champion. 11-12: Deal 4 damage to all enemy champions.",
+      "cost": 2,
+      "image": "HouseOdds.png",
+      "target": "none",
+      "effect": [
+        {"type": "custom", "name": "houseOdds"}
+      ],
+      "customHandler": "rollDice",
+      "requiresAlive": true
+    },
+    {
+      "character": "Illusionist",
+      "name": "Unlimited Chances",
+      "Number in Deck": 1,
+      "type": "Response",
+      "description": "Roll for a 50% chance to negate incoming damage. If you win the roll, return this card to your hand.",
+      "cost": 0,
+      "image": "UnlimitedChances.png",
+      "target": "self",
+      "effect": [
+        {"type": "buff", "name": "negateDamage", "value": true},
+        {"type": "buff", "name": "returnToHand", "value": true}
+      ],
+      "trigger": "beforeDamage",
+      "condition": {"chance": 0.5},
+      "effectOrder": [0, 1],
+      "requiresAlive": true
+    },
+    {
+      "character": "DarkWizard",
+      "name": "Lifetap",
+      "Number in Deck": 2,
+      "type": "Action",
+      "description": "Draw a card. Lose 1 life.",
+      "cost": 0,
+      "image": "Lifetap.png",
+      "target": "self",
+      "effect": [
+        {"type": "draw", "value": 1},
+        {"type": "damage", "value": 1}
+      ],
+      "effectOrder": [0, 1],
+      "requiresAlive": true
+    },
+    {
+      "character": "DarkWizard",
+      "name": "Pit of Despair",
+      "Number in Deck": 2,
+      "type": "Response",
+      "description": "Before an enemy champion moves into melee range, the Dark Wizard surrounds himself with pits until the end of turn. The enemy forfeits any remaining movement.",
+      "cost": 0,
+      "image": "PitOfDespair.png",
+      "target": "enemy",
+      "effect": [
+        {"type": "buff", "name": "createPits", "value": true, "duration": "thisTurn"},
+        {"type": "debuff", "name": "canMove", "value": false, "duration": "thisTurn"}
+      ],
+      "range": 1,
+      "trigger": "onMove",
+      "effectOrder": [0, 1],
+      "requiresAlive": true
+    },
+    {
+      "character": "DarkWizard",
+      "name": "Mana Burn",
+      "Number in Deck": 2,
+      "type": "Action",
+      "description": "Your opponent starts next turn with X mana crystals locked.",
+      "cost": 1,
+      "image": "ManaBurn.png",
+      "target": "none",
+      "effect": [
+        {"type": "debuff", "name": "lockMana", "value": "X", "duration": "nextTurn", "scope": "enemies"}
+      ],
+      "range": "global",
+      "conditionValue": 2
+    },
+    {
+      "character": "DarkWizard",
+      "name": "Black Hole",
+      "Number in Deck": 2,
+      "type": "Action",
+      "description": "Choose target position. Deal 1 damage to all champions in AOE range. Dark Wizard gains life equal to damage done.",
+      "cost": 1,
+      "image": "BlackHole.png",
+      "target": "position",
+      "effect": [
+        {"type": "damage", "value": 1, "scope": "all"},
+        {"type": "heal", "value": "damageDealt", "target": "self"}
+      ],
+      "range": "AOE",
+      "effectOrder": [0, 1],
+      "requiresAlive": true
+    },
+    {
+      "character": "DarkWizard",
+      "name": "No Pain, No Gain",
+      "Number in Deck": 2,
+      "type": "Action",
+      "description": "The Dark Wizard loses 2 life. Gain 2 attack.",
+      "cost": 1,
+      "image": "NoPainNoGain.png",
+      "target": "self",
+      "effect": [
+        {"type": "damage", "value": 2},
+        {"type": "buff", "name": "extraAttack", "value": true, "duration": "thisTurn"}
+      ],
+      "effectOrder": [0, 1],
+      "requiresAlive": true
+    },
+    {
+      "character": "DarkWizard",
+      "name": "Hypnotize",
+      "Number in Deck": 2,
+      "type": "Action",
+      "description": "Target enemy champion is immune until they pay 2 gems on their turn.",
+      "cost": 2,
+      "image": "Hypnotize.png",
+      "target": "enemy",
+      "effect": [
+        {"type": "buff", "name": "immune", "value": true, "duration": "untilPaid"},
+        {"type": "debuff", "name": "hypnotized", "value": 2, "duration": "untilPaid"}
+      ],
+      "effectOrder": [0, 1],
+      "stackable": false
+    },
+    {
+      "character": "DarkWizard",
+      "name": "Shadow Bolt",
+      "Number in Deck": 2,
+      "type": "Action",
+      "description": "Deal damage to target enemy champion equal to the Dark Wizard’s power.",
+      "cost": 2,
+      "image": "ShadowBolt.png",
+      "target": "enemy",
+      "effect": [
+        {"type": "damage", "value": "power"}
+      ],
+      "requiresAlive": true
+    },
+    {
+      "character": "DarkWizard",
+      "name": "Underworld Terror",
+      "Number in Deck": 2,
+      "type": "Action",
+      "description": "All enemy champions’ power equals 0 on their next turn. Cannot be buffed.",
+      "cost": 3,
+      "image": "UnderworldTerror.png",
+      "target": "none",
+      "effect": [
+        {"type": "debuff", "name": "powerLocked", "value": true, "duration": "nextTurn", "scope": "enemies"}
+      ],
+      "range": "global"
+    },
+    {
+      "character": "DarkWizard",
+      "name": "Evil Tricks",
+      "Number in Deck": 1,
+      "type": "Action",
+      "description": "Choose 2: Deal 2 damage to target enemy, discard a card and draw a card, restore 2 health to Dark Wizard.",
+      "cost": 1,
+      "image": "EvilTricks.png",
+      "target": "enemy",
+      "effect": [
+        {"type": "custom", "name": "evilTricks", "options": [{"damage": 2}, {"discard": 1, "draw": 1}, {"heal": 2, "target": "self"}], "choose": 2}
+      ],
+      "customHandler": "chooseEffects",
+      "targetSelection": "player",
+      "requiresAlive": true
+    },
+    {
+      "character": "DarkWizard",
+      "name": "Life Force",
+      "Number in Deck": 1,
+      "type": "Action",
+      "description": "Discard any number of cards. Restore 2 life to the Dark Wizard for each discarded card.",
+      "cost": 2,
+      "image": "LifeForce.png",
+      "target": "none",
+      "effect": [
+        {"type": "discard", "value": "any"},
+        {"type": "heal", "value": 2, "target": "self", "condition": {"scale": "discarded"}}
+      ],
+      "effectOrder": [0, 1],
+      "targetSelection": "player",
+      "requiresAlive": true
+    },
+    {
+      "character": "DarkWizard",
+      "name": "Telekinesis",
+      "Number in Deck": 1,
+      "type": "Action",
+      "description": "Return 3 mana worth of spells from your discard pile to your hand. Max 3 cards.",
+      "cost": 3,
+      "image": "Telekinesis.png",
+      "target": "none",
+      "effect": [
+        {"type": "draw", "value": 3, "condition": {"from": "discard", "maxMana": 3}}
+      ],
+      "targetSelection": "player"
+    },
+    {
+      "character": "DarkWizard",
+      "name": "Shadow Burst",
+      "Number in Deck": 1,
+      "type": "Action",
+      "description": "Deal damage to target enemy champion equal to the number of Dark Wizard cards in your discard pile. Shuffle your discard pile into your deck.",
+      "cost": 4,
+      "image": "ShadowBurst.png",
+      "target": "enemy",
+      "effect": [
+        {"type": "damage", "value": "discardCount", "condition": {"filter": "DarkWizard"}},
+        {"type": "buff", "name": "shuffleDiscard", "value": true}
+      ],
+      "effectOrder": [0, 1]
+    },
+    {
+      "character": "Alchemist",
+      "name": "Stealth Flask",
+      "Number in Deck": 2,
+      "type": "Action",
+      "description": "Choose any friendly champion. They ignore all non-AOE damage until your next turn.",
+      "cost": 0,
+      "image": "StealthFlask.png",
+      "target": "friendly",
+      "effect": [
+        {"type": "buff", "name": "stealth", "value": true, "duration": "nextTurn"}
+      ],
+      "stackable": false
+    },
+    {
+      "character": "Alchemist",
+      "name": "Agility Flask",
+      "Number in Deck": 2,
+      "type": "Action",
+      "description": "Give any friendly champion +2 range and +2 movement until the end of turn.",
+      "cost": 0,
+      "image": "AgilityFlask.png",
+      "target": "friendly",
+      "effect": [
+        {"type": "statMod", "stat": "range", "value": 2, "duration": "thisTurn"},
+        {"type": "statMod", "stat": "movementSpeed", "value": 2, "duration": "thisTurn"}
+      ]
+    },
+    {
+      "character": "Alchemist",
+      "name": "Might Flask",
+      "Number in Deck": 2,
+      "type": "Action",
+      "description": "Give any friendly champion +2 power until end of turn.",
+      "cost": 1,
+      "image": "MightFlask.png",
+      "target": "friendly",
+      "effect": [
+        {"type": "statMod", "stat": "power", "value": 2, "duration": "thisTurn"}
+      ]
+    },
+    {
+      "character": "Alchemist",
+      "name": "Rejuvenation Flask",
+      "Number in Deck": 2,
+      "type": "Action",
+      "description": "Restore 4 health to any friendly champion.",
+      "cost": 1,
+      "image": "RejuvenationFlask.png",
+      "target": "friendly",
+      "effect": [
+        {"type": "heal", "value": 4}
+      ]
+    },
+    {
+      "character": "Alchemist",
+      "name": "Superior Flask",
+      "Number in Deck": 2,
+      "type": "Action",
+      "description": "Give any friendly champion +1 to each stat until end of turn.",
+      "cost": 1,
+      "image": "SuperiorFlask.png",
+      "target": "friendly",
+      "effect": [
+        {"type": "statMod", "stat": "power", "value": 1, "duration": "thisTurn"},
+        {"type": "statMod", "stat": "range", "value": 1, "duration": "thisTurn"},
+        {"type": "statMod", "stat": "movementSpeed", "value": 1, "duration": "thisTurn"}
+      ]
+    },
+    {
+      "character": "Alchemist",
+      "name": "Acid Bomb",
+      "Number in Deck": 2,
+      "type": "Action",
+      "description": "Choose a position in line of sight. All champions in AOE range take 2 damage.",
+      "cost": 2,
+      "image": "AcidBomb.png",
+      "target": "position",
+      "effect": [
+        {"type": "damage", "value": 2, "scope": "all"}
+      ],
+      "range": "AOE",
+      "requiresAlive": true
+    },
+    {
+      "character": "Alchemist",
+      "name": "Smoke Bomb",
+      "Number in Deck": 2,
+      "type": "Response",
+      "description": "Before damage is dealt, all friendly champions gain an immediate movement phase.",
+      "cost": 2,
+      "image": "SmokeBomb.png",
+      "target": "none",
+      "effect": [
+        {"type": "move", "value": "immediate", "scope": "friendlies"}
+      ],
+      "trigger": "beforeDamage",
+      "range": "global"
+    },
+    {
+      "character": "Alchemist",
+      "name": "Preparation",
+      "Number in Deck": 2,
+      "type": "Action",
+      "description": "Put two flasks from your discard pile back into your hand.",
+      "cost": 3,
+      "image": "Preparation.png",
+      "target": "none",
+      "effect": [
+        {"type": "draw", "value": 2, "condition": {"from": "discard", "filter": "Flask"}}
+      ],
+      "targetSelection": "player"
+    },
+    {
+      "character": "Alchemist",
+      "name": "Spectre’s Essence",
+      "Number in Deck": 1,
+      "type": "Action",
+      "description": "Each flask you cast this turn has a 50% chance to deal 1 damage to all enemy champions.",
+      "cost": 1,
+      "image": "SpectresEssence.png",
+      "target": "self",
+      "effect": [
+        {"type": "buff", "name": "spectreEssence", "value": true, "duration": "thisTurn"}
+      ],
+      "condition": {"chance": 0.5},
+      "requiresAlive": true
+    },
+    {
+      "character": "Alchemist",
+      "name": "Time Warp Flask",
+      "Number in Deck": 1,
+      "type": "Action",
+      "description": "Shuffle all cards in all discard piles back into their deck. All players discard their hand and draw 5 cards.",
+      "cost": 2,
+      "image": "TimeWarpFlask.png",
+      "target": "none",
+      "effect": [
+        {"type": "buff", "name": "shuffleDiscard", "value": true, "scope": "all"},
+        {"type": "discard", "value": "all", "scope": "all"},
+        {"type": "draw", "value": 5, "scope": "all"}
+      ],
+      "range": "global",
+      "effectOrder": [0, 1, 2]
+    },
+    {
+      "character": "Alchemist",
+      "name": "Every Last Drop",
+      "Number in Deck": 1,
+      "type": "Equipment",
+      "description": "Equip. You may cast flasks from the discard pile for 1 more.",
+      "cost": 3,
+      "image": "EveryLastDrop.png",
+      "target": "self",
+      "effect": [
+        {"type": "buff", "name": "castFromDiscard", "value": true, "condition": {"filter": "Flask", "extraCost": 1}}
+      ],
+      "charges": -1,
+      "requiresAlive": true
+    },
+    {
+      "character": "Alchemist",
+      "name": "Dragon’s Tail",
+      "Number in Deck": 1,
+      "type": "Equipment",
+      "description": "Equip. All flasks you cast give an additional +1 to the affected stats.",
+      "cost": 4,
+      "image": "DragonsTail.png",
+      "target": "self",
+      "effect": [
+        {"type": "buff", "name": "boostFlasks", "value": 1}
+      ],
+      "charges": -1,
+      "requiresAlive": true
+    }
+  ]

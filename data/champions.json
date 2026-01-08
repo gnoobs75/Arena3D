@@ -1,0 +1,122 @@
+{
+	"Brute": {
+		"id": "brute",
+		"display_name": "Brute",
+		"range": 1,
+		"power": 2,
+		"movement": 4,
+		"starting_hp": 20,
+		"description": "A heavily armored warrior focused on control and tanking damage.",
+		"style": "Tank/Control"
+	},
+	"Ranger": {
+		"id": "ranger",
+		"display_name": "Ranger",
+		"range": 7,
+		"power": 1,
+		"movement": 3,
+		"starting_hp": 20,
+		"description": "A long-range marksman who excels at dealing damage from afar.",
+		"style": "Ranged DPS"
+	},
+	"Beast": {
+		"id": "beast",
+		"display_name": "Beast",
+		"range": 1,
+		"power": 2,
+		"movement": 3,
+		"starting_hp": 20,
+		"description": "A shapeshifter with multiple forms and adaptive abilities.",
+		"style": "Multi-form"
+	},
+	"Redeemer": {
+		"id": "redeemer",
+		"display_name": "Redeemer",
+		"range": 5,
+		"power": 1,
+		"movement": 5,
+		"starting_hp": 20,
+		"description": "A holy healer who supports allies and can swap life with the fallen.",
+		"style": "Healer/Support"
+	},
+	"Confessor": {
+		"id": "confessor",
+		"display_name": "Confessor",
+		"range": 4,
+		"power": 0,
+		"movement": 4,
+		"starting_hp": 20,
+		"description": "A disruptive controller who manipulates and locks down enemies.",
+		"style": "Disruption"
+	},
+	"Barbarian": {
+		"id": "barbarian",
+		"display_name": "Barbarian",
+		"range": 1,
+		"power": 2,
+		"movement": 4,
+		"starting_hp": 20,
+		"description": "A risk/reward fighter who grows stronger when wounded.",
+		"style": "Risk/Reward"
+	},
+	"Burglar": {
+		"id": "burglar",
+		"display_name": "Burglar",
+		"range": 2,
+		"power": 2,
+		"movement": 4,
+		"starting_hp": 20,
+		"description": "A nimble thief with high mobility and evasion.",
+		"style": "Mobility"
+	},
+	"Berserker": {
+		"id": "berserker",
+		"display_name": "Berserker",
+		"range": 1,
+		"power": 3,
+		"movement": 3,
+		"starting_hp": 20,
+		"description": "A glass cannon who deals massive damage but takes extra harm.",
+		"style": "Glass Cannon"
+	},
+	"Shaman": {
+		"id": "shaman",
+		"display_name": "Shaman",
+		"range": 3,
+		"power": 2,
+		"movement": 4,
+		"starting_hp": 20,
+		"description": "A versatile utility caster with spirit abilities.",
+		"style": "Utility"
+	},
+	"Illusionist": {
+		"id": "illusionist",
+		"display_name": "Illusionist",
+		"range": 6,
+		"power": 0,
+		"movement": 3,
+		"starting_hp": 20,
+		"description": "A trickster who gambles with chance and creates illusions.",
+		"style": "Gambling/Tricks"
+	},
+	"DarkWizard": {
+		"id": "darkwizard",
+		"display_name": "Dark Wizard",
+		"range": 4,
+		"power": 2,
+		"movement": 4,
+		"starting_hp": 20,
+		"description": "A life-draining mage who heals by dealing damage.",
+		"style": "Life Drain"
+	},
+	"Alchemist": {
+		"id": "alchemist",
+		"display_name": "Alchemist",
+		"range": 2,
+		"power": 1,
+		"movement": 5,
+		"starting_hp": 20,
+		"description": "A potion master who buffs allies with powerful flask effects.",
+		"style": "Flask Buffs"
+	}
+}

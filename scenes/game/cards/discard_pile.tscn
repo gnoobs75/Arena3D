@@ -1,0 +1,7 @@
+[gd_scene load_steps=2 format=3 uid="uid://discard_pile"]
+
+[ext_resource type="Script" path="res://scenes/game/cards/discard_pile.gd" id="1_discard"]
+
+[node name="DiscardPile" type="Control"]
+custom_minimum_size = Vector2(100, 140)
+script = ExtResource("1_discard")
