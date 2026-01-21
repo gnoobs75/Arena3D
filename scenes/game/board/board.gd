@@ -24,7 +24,7 @@ var _is_ready: bool = false
 var game_state: GameState
 var tile_nodes: Array = []  # 2D array of tile Controls
 var highlight_nodes: Array = []  # 2D array of highlight Controls
-var champion_nodes: Dictionary = {}  # champion_id -> ChampionToken
+var champion_nodes: Dictionary = {}  # champion_id -> ChampionVisual
 var hovered_tile: Vector2i = Vector2i(-1, -1)
 var selected_champion: String = ""
 
@@ -32,6 +32,7 @@ var selected_champion: String = ""
 var move_highlights: Array[Vector2i] = []
 var attack_highlights: Array[Vector2i] = []
 var cast_highlights: Array[Vector2i] = []
+var range_highlights: Array[Vector2i] = []  # Yellow range indicator
 
 
 func _ready() -> void:
@@ -182,12 +183,13 @@ func _create_champions() -> void:
 		champion_nodes[champ.unique_id] = token
 
 
-func _create_champion_token(champ: ChampionState) -> Control:
-	"""Create a styled champion token."""
-	var token := ChampionToken.new()
-	token.setup(champ)
-	token.position = _grid_to_world(champ.position) - Vector2(VisualTheme.CHAMPION_TOKEN_SIZE / 2, VisualTheme.CHAMPION_TOKEN_SIZE / 2)
-	return token
+func _create_champion_token(champ: ChampionState) -> Node2D:
+	"""Create a Battle Chess-style champion visual."""
+	var visual := ChampionVisual.new()
+	visual.setup(champ)
+	# ChampionVisual is centered, so position at tile center
+	visual.position = _grid_to_world(champ.position)
+	return visual
 
 
 func _grid_to_world(grid_pos: Vector2i) -> Vector2:
@@ -196,6 +198,16 @@ func _grid_to_world(grid_pos: Vector2i) -> Vector2:
 		grid_pos.x * TILE_SIZE + TILE_SIZE / 2,
 		grid_pos.y * TILE_SIZE + TILE_SIZE / 2
 	)
+
+
+func get_champion_screen_position(champion_id: String) -> Vector2:
+	"""Get the global screen position of a champion for UI overlays."""
+	if not champion_nodes.has(champion_id):
+		return Vector2.ZERO
+
+	var visual: ChampionVisual = champion_nodes[champion_id]
+	# ChampionVisual is already centered at its position
+	return visual.global_position
 
 
 func _world_to_grid(world_pos: Vector2) -> Vector2i:
@@ -287,15 +299,21 @@ func show_cast_highlights(positions: Array[Vector2i]) -> void:
 	_apply_highlights()
 
 
+func show_range_highlights(positions: Array[Vector2i]) -> void:
+	"""Show attack range area (yellow)."""
+	range_highlights = positions
+	_apply_highlights()
+
+
 func select_champion(champion_id: String) -> void:
 	"""Highlight selected champion's tile."""
 	selected_champion = champion_id
 	_apply_highlights()
 
-	# Update champion token selection state
+	# Update champion visual selection state
 	for id in champion_nodes:
-		var token: ChampionToken = champion_nodes[id]
-		token.set_selected(id == champion_id)
+		var visual: ChampionVisual = champion_nodes[id]
+		visual.set_selected(id == champion_id)
 
 
 func clear_highlights() -> void:
@@ -303,13 +321,14 @@ func clear_highlights() -> void:
 	move_highlights.clear()
 	attack_highlights.clear()
 	cast_highlights.clear()
+	range_highlights.clear()
 	selected_champion = ""
 	_apply_highlights()
 
 	# Clear champion selection
 	for id in champion_nodes:
-		var token: ChampionToken = champion_nodes[id]
-		token.set_selected(false)
+		var visual: ChampionVisual = champion_nodes[id]
+		visual.set_selected(false)
 
 
 func _apply_highlights() -> void:
@@ -323,6 +342,14 @@ func _apply_highlights() -> void:
 				drawer.highlight_type = HighlightDrawer.HighlightType.NONE
 				drawer.queue_redraw()
 
+	# Range highlights first (lowest priority - underneath others)
+	for pos: Vector2i in range_highlights:
+		_set_highlight(pos, HighlightDrawer.HighlightType.RANGE)
+
+	# Move highlights (override range)
+	for pos: Vector2i in move_highlights:
+		_set_highlight(pos, HighlightDrawer.HighlightType.MOVE)
+
 	# Selected champion
 	if not selected_champion.is_empty():
 		var champ := game_state.get_champion(selected_champion)
@@ -330,11 +357,7 @@ func _apply_highlights() -> void:
 			var pos: Vector2i = champ.position
 			_set_highlight(pos, HighlightDrawer.HighlightType.SELECTED)
 
-	# Move highlights
-	for pos: Vector2i in move_highlights:
-		_set_highlight(pos, HighlightDrawer.HighlightType.MOVE)
-
-	# Attack highlights
+	# Attack highlights (override move)
 	for pos: Vector2i in attack_highlights:
 		_set_highlight(pos, HighlightDrawer.HighlightType.ATTACK)
 
@@ -360,20 +383,21 @@ func update_champion_positions() -> void:
 	"""Update all champion positions on board."""
 	for champ: ChampionState in game_state.get_all_champions():
 		if champion_nodes.has(champ.unique_id):
-			var token: ChampionToken = champion_nodes[champ.unique_id]
+			var visual: ChampionVisual = champion_nodes[champ.unique_id]
 			if champ.is_alive() and champ.is_on_board:
-				token.visible = true
-				token.position = _grid_to_world(champ.position) - Vector2(VisualTheme.CHAMPION_TOKEN_SIZE / 2, VisualTheme.CHAMPION_TOKEN_SIZE / 2)
+				visual.visible = true
+				# ChampionVisual is centered, so position at tile center
+				visual.position = _grid_to_world(champ.position)
 			else:
-				token.visible = false
+				visual.visible = false
 
 
 func update_champion_hp() -> void:
 	"""Update HP displays for all champions."""
 	for champ: ChampionState in game_state.get_all_champions():
 		if champion_nodes.has(champ.unique_id):
-			var token: ChampionToken = champion_nodes[champ.unique_id]
-			token.update_hp(champ.current_hp, champ.max_hp)
+			var visual: ChampionVisual = champion_nodes[champ.unique_id]
+			visual.update_hp(champ.current_hp, champ.max_hp)
 
 
 func animate_move(champion_id: String, path: Array[Vector2i], duration: float = 0.3) -> void:
@@ -381,12 +405,18 @@ func animate_move(champion_id: String, path: Array[Vector2i], duration: float = 
 	if not champion_nodes.has(champion_id):
 		return
 
-	var token: ChampionToken = champion_nodes[champion_id]
+	var visual: ChampionVisual = champion_nodes[champion_id]
 	var tween := create_tween()
 
+	# Trigger walk animation on the visual
+	if path.size() > 0:
+		var direction := Vector2(path[-1] - path[0])
+		visual.play_walk_animation(direction)
+
 	for pos: Vector2i in path:
-		var world_pos := _grid_to_world(pos) - Vector2(VisualTheme.CHAMPION_TOKEN_SIZE / 2, VisualTheme.CHAMPION_TOKEN_SIZE / 2)
-		tween.tween_property(token, "position", world_pos, duration / path.size())
+		# ChampionVisual is centered, so position at tile center
+		var world_pos := _grid_to_world(pos)
+		tween.tween_property(visual, "position", world_pos, duration / path.size())
 
 
 func animate_attack(attacker_id: String, target_id: String) -> void:
@@ -394,20 +424,17 @@ func animate_attack(attacker_id: String, target_id: String) -> void:
 	if not champion_nodes.has(attacker_id) or not champion_nodes.has(target_id):
 		return
 
-	var attacker: ChampionToken = champion_nodes[attacker_id]
-	var target: ChampionToken = champion_nodes[target_id]
+	var attacker: ChampionVisual = champion_nodes[attacker_id]
+	var target: ChampionVisual = champion_nodes[target_id]
 
-	var original_pos: Vector2 = attacker.position
-	var target_pos: Vector2 = target.position
-	var lunge_pos: Vector2 = original_pos.lerp(target_pos, 0.3)
+	# Get direction from attacker to target
+	var direction: Vector2 = target.position - attacker.position
 
-	var tween := create_tween()
-	tween.tween_property(attacker, "position", lunge_pos, 0.1)
-	tween.tween_property(attacker, "position", original_pos, 0.1)
+	# Trigger attack animation on the attacker visual
+	attacker.play_attack_animation(direction)
 
-	# Flash target
-	tween.parallel().tween_property(target, "modulate", Color.RED, 0.1)
-	tween.tween_property(target, "modulate", Color.WHITE, 0.1)
+	# Trigger hit animation on the target visual
+	target.play_hit_animation()
 
 
 func get_board_size_pixels() -> Vector2:
@@ -474,7 +501,7 @@ class TileDrawer extends Control:
 
 class HighlightDrawer extends Control:
 	"""Custom drawing for tile highlights."""
-	enum HighlightType { NONE, MOVE, ATTACK, CAST, SELECTED }
+	enum HighlightType { NONE, MOVE, ATTACK, CAST, SELECTED, RANGE }
 
 	var highlight_type: int = HighlightType.NONE
 	var is_hovered: bool = false
@@ -507,6 +534,9 @@ class HighlightDrawer extends Control:
 			HighlightType.SELECTED:
 				fill_color = VisualTheme.HIGHLIGHT_SELECTED
 				border_color = VisualTheme.HIGHLIGHT_SELECTED_BORDER
+			HighlightType.RANGE:
+				fill_color = Color(0.9, 0.8, 0.2, 0.15)  # Yellow range indicator
+				border_color = Color(0.9, 0.8, 0.2, 0.4)
 
 		# Fill
 		draw_rect(Rect2(2, 2, w - 4, h - 4), fill_color)
@@ -519,78 +549,3 @@ class HighlightDrawer extends Control:
 			draw_rect(Rect2(0, 0, w, h), Color(1, 1, 1, 0.1))
 
 
-class ChampionToken extends Control:
-	"""Styled champion token with HP bar."""
-	var champion_state: ChampionState
-	var current_hp: int = 20
-	var max_hp: int = 20
-	var is_selected: bool = false
-	var owner_id: int = 1
-	var champion_name: String = ""
-
-	func _init() -> void:
-		size = Vector2(VisualTheme.CHAMPION_TOKEN_SIZE, VisualTheme.CHAMPION_TOKEN_SIZE)
-		custom_minimum_size = size
-
-	func setup(champ: ChampionState) -> void:
-		champion_state = champ
-		current_hp = champ.current_hp
-		max_hp = champ.max_hp
-		owner_id = champ.owner_id
-		champion_name = champ.champion_name
-		queue_redraw()
-
-	func update_hp(hp: int, max_val: int) -> void:
-		current_hp = hp
-		max_hp = max_val
-		queue_redraw()
-
-	func set_selected(selected: bool) -> void:
-		is_selected = selected
-		queue_redraw()
-
-	func _draw() -> void:
-		var w := size.x
-		var h := size.y
-		var center := Vector2(w / 2, h / 2 - 4)
-		var radius := w / 2 - 4
-
-		# Team color
-		var team_color := VisualTheme.get_player_color(owner_id)
-		var dark_color := VisualTheme.get_player_dark_color(owner_id)
-
-		# Selection glow
-		if is_selected:
-			draw_circle(center, radius + 4, VisualTheme.HIGHLIGHT_SELECTED_BORDER)
-
-		# Outer ring (dark)
-		draw_circle(center, radius, dark_color)
-
-		# Inner circle (team color)
-		draw_circle(center, radius - 3, team_color)
-
-		# Champion initials
-		var font := ThemeDB.fallback_font
-		var initials := champion_name.substr(0, 2).to_upper()
-		var text_size := font.get_string_size(initials, HORIZONTAL_ALIGNMENT_CENTER, -1, 14)
-		draw_string(font, center - Vector2(text_size.x / 2, -5), initials, HORIZONTAL_ALIGNMENT_CENTER, -1, 14, Color.WHITE)
-
-		# HP Bar
-		var bar_y := h - 10
-		var bar_height := 6
-		var bar_width := w - 8
-
-		# Bar background
-		draw_rect(Rect2(4, bar_y, bar_width, bar_height), VisualTheme.HP_BAR_BG)
-
-		# HP fill
-		var hp_pct := float(current_hp) / float(max_hp) if max_hp > 0 else 0.0
-		var hp_color := VisualTheme.get_hp_color(current_hp, max_hp)
-		draw_rect(Rect2(4, bar_y, bar_width * hp_pct, bar_height), hp_color)
-
-		# Bar border
-		draw_rect(Rect2(4, bar_y, bar_width, bar_height), VisualTheme.HP_BAR_BORDER, false, 1.0)
-
-		# HP text
-		var hp_text := str(current_hp)
-		draw_string(font, Vector2(w / 2 - 4, bar_y + 5), hp_text, HORIZONTAL_ALIGNMENT_CENTER, -1, 8, Color.WHITE)

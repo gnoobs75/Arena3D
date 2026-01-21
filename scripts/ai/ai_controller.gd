@@ -61,8 +61,23 @@ func take_turn() -> void:
 
 	var actions_taken := 0
 	var max_actions := 20  # Safety limit
+	var consecutive_failures := 0
+	var max_failures := 5  # Break if too many consecutive failures
 
 	while actions_taken < max_actions:
+		# Wait for any response windows to close before continuing
+		while game_controller.response_stack.is_open():
+			print("AI: Waiting for response window to close...")
+			await _delay(0.5)
+			# Safety check - if we've been waiting too long, something is wrong
+			consecutive_failures += 1
+			if consecutive_failures > 10:
+				print("AI: Response window stuck, forcing end turn")
+				break
+
+		if consecutive_failures > 10:
+			break
+
 		var action := _choose_action()
 
 		if action.is_empty() or action.get("type") == "end_turn":
@@ -71,7 +86,14 @@ func take_turn() -> void:
 		var result := _execute_action(action)
 		if result.get("success", false):
 			actions_taken += 1
+			consecutive_failures = 0  # Reset on success
 			action_chosen.emit(action)
+		else:
+			consecutive_failures += 1
+			print("AI: Action failed (%d consecutive failures)" % consecutive_failures)
+			if consecutive_failures >= max_failures:
+				print("AI: Too many failures, ending turn")
+				break
 
 		# Small delay between actions for visual feedback
 		await _delay(0.3)
@@ -88,7 +110,19 @@ func _choose_action() -> Dictionary:
 	# Get all valid actions
 	var valid_actions := _get_all_valid_actions(state)
 
+	# Debug: count action types
+	var move_count := 0
+	var attack_count := 0
+	var cast_count := 0
+	for action: Dictionary in valid_actions:
+		match action.get("type", ""):
+			"move": move_count += 1
+			"attack": attack_count += 1
+			"cast": cast_count += 1
+	print("AI: Found %d valid actions (moves: %d, attacks: %d, casts: %d)" % [valid_actions.size(), move_count, attack_count, cast_count])
+
 	if valid_actions.is_empty():
+		print("AI: No valid actions, ending turn")
 		return {"type": "end_turn"}
 
 	# Score actions
@@ -107,15 +141,25 @@ func _choose_action() -> Dictionary:
 
 	# Choose action based on difficulty
 	var optimal_chance: float = profile.get("optimal_chance", 0.5)
+	var chosen_action: Dictionary
 
 	if randf() < optimal_chance:
 		# Pick best action
-		return scored_actions[0]["action"]
+		chosen_action = scored_actions[0]["action"]
 	else:
 		# Pick random from top 3
 		var top_count := mini(3, scored_actions.size())
 		var index := randi() % top_count
-		return scored_actions[index]["action"]
+		chosen_action = scored_actions[index]["action"]
+
+	# Debug output
+	var action_type: String = chosen_action.get("type", "unknown")
+	var score: float = scored_actions[0]["score"] if not scored_actions.is_empty() else 0.0
+	print("AI: Chose %s action (best score: %.1f)" % [action_type, score])
+	if action_type == "cast":
+		print("AI: Casting card '%s'" % chosen_action.get("card", ""))
+
+	return chosen_action
 
 
 func _get_all_valid_actions(state: GameState) -> Array:
@@ -180,27 +224,58 @@ func _get_valid_cast_targets(state: GameState, caster: ChampionState, card_data:
 	var target_type: String = card_data.get("target", "none")
 
 	match target_type.to_lower():
-		"none", "self":
+		"none":
 			target_sets.append([])
+		"self":
+			# Self-targeting cards should pass the caster's ID
+			target_sets.append([caster.unique_id])
 		"enemy":
 			var opp_id := 1 if player_id == 2 else 2
 			for enemy: ChampionState in state.get_living_champions(opp_id):
-				target_sets.append([enemy.unique_id])
+				# Check if enemy is in range for targeted cards
+				if _is_valid_target_for_card(caster, enemy, card_data, state):
+					target_sets.append([enemy.unique_id])
 		"ally", "friendly":
 			for ally: ChampionState in state.get_living_champions(player_id):
 				if ally.unique_id != caster.unique_id:
-					target_sets.append([ally.unique_id])
+					if _is_valid_target_for_card(caster, ally, card_data, state):
+						target_sets.append([ally.unique_id])
 		"champion", "any":
 			for champ: ChampionState in state.get_all_champions():
 				if champ.is_alive():
-					target_sets.append([champ.unique_id])
+					if _is_valid_target_for_card(caster, champ, card_data, state):
+						target_sets.append([champ.unique_id])
 		"allyorself":
 			for ally: ChampionState in state.get_living_champions(player_id):
-				target_sets.append([ally.unique_id])
+				if _is_valid_target_for_card(caster, ally, card_data, state):
+					target_sets.append([ally.unique_id])
 		_:
 			target_sets.append([])
 
 	return target_sets
+
+
+func _is_valid_target_for_card(caster: ChampionState, target: ChampionState, card_data: Dictionary, state: GameState) -> bool:
+	"""Check if a target is valid for a card (including range check)."""
+	# Self is always valid
+	if caster.unique_id == target.unique_id:
+		return true
+
+	# Check range based on caster's attack range
+	var caster_pos: Vector2i = caster.position
+	var target_pos: Vector2i = target.position
+	var is_melee: bool = caster.current_range <= 1
+
+	if is_melee:
+		var dist: int = maxi(absi(target_pos.x - caster_pos.x), absi(target_pos.y - caster_pos.y))
+		return dist <= caster.current_range
+	else:
+		var dx: int = target_pos.x - caster_pos.x
+		var dy: int = target_pos.y - caster_pos.y
+		if dx != 0 and dy != 0:
+			return false
+		var dist: int = absi(dx) + absi(dy)
+		return dist <= caster.current_range
 
 
 func _score_action(action: Dictionary, state: GameState) -> float:
@@ -280,16 +355,18 @@ func _score_attack(action: Dictionary, state: GameState) -> float:
 
 func _score_cast(action: Dictionary, state: GameState) -> float:
 	"""Score a card cast action."""
-	var score := 2.0  # Base cast value
+	var score := 3.0  # Base cast value (increased)
 	var card_name: String = action.get("card", "")
 	var card_data := CardDatabase.get_card(card_name)
 	var targets: Array = action.get("targets", [])
+	var caster := state.get_champion(action.get("champion", ""))
 
-	if card_data.is_empty():
+	if card_data.is_empty() or caster == null:
 		return 0.0
 
 	var cost: int = card_data.get("cost", 0)
 	var effects: Array = card_data.get("effect", [])
+	var mana := state.get_mana(player_id)
 
 	# Evaluate effects
 	for effect: Dictionary in effects:
@@ -298,37 +375,87 @@ func _score_cast(action: Dictionary, state: GameState) -> float:
 		match effect_type:
 			"damage":
 				var damage = effect.get("value", 0)
+				var scope: String = effect.get("scope", "target")
+
 				if damage is int:
-					score += damage * 1.5
+					score += damage * 2.0
+
+					# Multi-target damage is very valuable
+					if scope == "enemies" or scope == "allenemies":
+						score += damage * 3.0
 
 				# Check if this kills a target
 				if not targets.is_empty():
-					var target := state.get_champion(targets[0])
-					if target and target.current_hp <= damage:
-						score += 8.0
+					var target := state.get_champion(str(targets[0]))
+					if target and damage is int and target.current_hp <= damage:
+						score += 10.0  # Kill bonus
 
 			"heal":
 				var heal = effect.get("value", 0)
 				if heal is int:
 					# Value healing more when low HP
-					var caster := state.get_champion(action.get("champion", ""))
-					if caster:
-						var hp_missing := caster.max_hp - caster.current_hp
-						score += mini(heal, hp_missing) * 1.2
+					var hp_missing := caster.max_hp - caster.current_hp
+					var effective_heal := mini(heal, hp_missing)
+					score += effective_heal * 1.5
+
+					# Urgent healing when very low
+					if caster.current_hp <= 5:
+						score += effective_heal * 2.0
+
+			"statMod":
+				var stat: String = effect.get("stat", "")
+				var value = effect.get("value", 0)
+				if value is int and value > 0:
+					match stat:
+						"power":
+							score += value * 3.0  # Power buffs are very valuable
+						"range":
+							score += value * 2.0
+						"movement":
+							score += value * 1.5
 
 			"buff":
-				score += 2.5
+				var buff_name: String = effect.get("name", "")
+				match buff_name:
+					"extraAttack":
+						# Very valuable if we have a target to attack
+						var range_calc := RangeCalculator.new()
+						var attack_targets := range_calc.get_valid_targets(caster, state)
+						if not attack_targets.is_empty():
+							score += 8.0
+						else:
+							score += 3.0
+					"extraMove":
+						score += 4.0
+					"leech":
+						score += 5.0
+					_:
+						score += 3.0
 
 			"debuff":
-				score += 2.0
+				score += 3.0
 
 			"draw":
-				score += 1.5
+				var draw_count = effect.get("value", 1)
+				if draw_count is int:
+					score += draw_count * 2.0
 
-	# Mana efficiency
+			"move":
+				# Movement effects (push, pull, etc.)
+				score += 3.0
+
+	# Prefer using mana efficiently - don't waste mana at end of turn
+	if mana >= cost:
+		# Bonus for using mana that would otherwise be wasted
+		var leftover_mana := mana - cost
+		if leftover_mana < 2:
+			score += 2.0
+
+	# Scale by cost for efficiency, but don't penalize too much
 	if cost > 0:
-		score = score / cost
+		score = score * (1.0 + 1.0 / cost)
 
+	print("AI: Scoring card '%s' = %.1f (cost %d, mana %d)" % [card_name, score, cost, mana])
 	return score
 
 

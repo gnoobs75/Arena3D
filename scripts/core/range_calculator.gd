@@ -64,8 +64,13 @@ func get_tiles_in_range(pos: Vector2i, range_value: int, is_melee: bool) -> Arra
 		# Melee: 8 directions
 		tiles = _get_tiles_in_chebyshev_range(pos, range_value)
 	else:
-		# Ranged: 4 cardinal directions only
-		tiles = _get_tiles_in_cardinal_range(pos, range_value)
+		# Ranged: Adjacent squares (all 8) + cardinal directions at range
+		# First add all 8 adjacent tiles (melee range)
+		tiles = _get_tiles_in_chebyshev_range(pos, 1)
+		# Then add cardinal directions beyond distance 1
+		for dir: Vector2i in CARDINAL_DIRS:
+			for dist in range(2, range_value + 1):
+				tiles.append(pos + dir * dist)
 
 	return tiles
 
@@ -101,22 +106,29 @@ func _calculate_attack_distance(attacker: ChampionState, target: ChampionState, 
 	"""
 	Calculate attack distance considering melee vs ranged rules.
 	Melee (range 1): Uses Chebyshev distance (8 directions)
-	Ranged (range 2+): Uses cardinal-only distance
+	Ranged (range 2+): Adjacent squares (all 8) + cardinal directions at range
 	"""
 	var from: Vector2i = attacker.position
 	var to: Vector2i = target.position
+	var dx: int = to.x - from.x
+	var dy: int = to.y - from.y
+	var chebyshev_dist: int = maxi(absi(dx), absi(dy))
 	var is_melee: bool = attacker.current_range <= MELEE_MAX_RANGE
 
 	if is_melee:
 		# Chebyshev distance - max of x and y diff
-		return maxi(absi(to.x - from.x), absi(to.y - from.y))
+		return chebyshev_dist
 	else:
-		# Ranged: Must be in a cardinal direction
+		# Ranged: Adjacent squares (distance 1) are always valid
+		if chebyshev_dist == 1:
+			return 1
+
+		# Beyond distance 1: Must be in a cardinal direction
 		if not _is_cardinal_direction(from, to):
-			return -1  # Invalid direction for ranged
+			return -1  # Invalid direction for ranged beyond melee range
 
 		# Manhattan distance for cardinal
-		return absi(to.x - from.x) + absi(to.y - from.y)
+		return absi(dx) + absi(dy)
 
 
 func _is_cardinal_direction(from: Vector2i, to: Vector2i) -> bool:

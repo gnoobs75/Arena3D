@@ -88,8 +88,9 @@ func setup(player: int) -> void:
 		discard_pile.setup(player)
 
 
-func update_hand(hand: Array, mana: int) -> void:
-	"""Update displayed cards from hand array."""
+func update_hand(hand: Array, mana: int, valid_responses: Array[String] = []) -> void:
+	"""Update displayed cards from hand array.
+	valid_responses: If non-empty, these response cards are playable (response window is open)."""
 	if not _is_ready or cards_container == null:
 		return
 	_clear_cards()
@@ -101,8 +102,12 @@ func update_hand(hand: Array, mana: int) -> void:
 		var cost: int = card_data.get("cost", 0)
 		var card_type: String = str(card_data.get("type", ""))
 
-		# Response cards aren't playable from hand normally
-		if card_type != "Response" and cost <= mana:
+		if card_type == "Response":
+			# Response cards are only playable during response windows
+			if card_name in valid_responses:
+				playable_cards.append(card_name)
+		elif cost <= mana:
+			# Action/Equipment cards playable if we have mana
 			playable_cards.append(card_name)
 
 	# Create card visuals

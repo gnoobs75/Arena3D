@@ -72,10 +72,21 @@ func start_game() -> void:
 		return
 
 	is_game_active = true
+
+	# Set CombatLog game state reference for champion name lookups
+	if CombatLog:
+		CombatLog.set_game_state(game_state)
+
+	var p1_champs := game_state.get_champions(1)
+	var p2_champs := game_state.get_champions(2)
+
 	game_started.emit(
 		_get_champion_names(1),
 		_get_champion_names(2)
 	)
+
+	# Emit to EventBus for combat log
+	EventBus.game_started.emit(p1_champs, p2_champs)
 
 	# Start first turn
 	turn_manager.start_game()
@@ -108,6 +119,9 @@ func move_champion(champion_id: String, target_pos: Vector2i) -> Dictionary:
 		}
 
 		action_performed.emit(result)
+
+		# Emit to EventBus for combat log
+		EventBus.champion_moved.emit(champion_id, action.from_position, target_pos)
 
 		# Check for onMove responses
 		_check_trigger("onMove", {
@@ -173,6 +187,13 @@ func _execute_attack(action: ActionSystem.AttackAction) -> Dictionary:
 
 		action_performed.emit(result)
 
+		# Emit to EventBus for combat log
+		EventBus.champion_attacked.emit(action.attacker_id, action.target_id, action.damage_dealt)
+		if action.damage_dealt > 0:
+			var attacker := game_state.get_champion(action.attacker_id)
+			var source_name := attacker.champion_name if attacker else "Attack"
+			EventBus.champion_damaged.emit(action.target_id, action.damage_dealt, source_name)
+
 		# Check for afterDamage responses
 		_check_trigger("afterDamage", {
 			"attacker": action.attacker_id,
@@ -186,6 +207,7 @@ func _execute_attack(action: ActionSystem.AttackAction) -> Dictionary:
 			# Check cheat death
 			if not BuffRegistry.check_cheat_death(target):
 				champion_died.emit(action.target_id)
+				EventBus.champion_died.emit(action.target_id, action.attacker_id)
 				_check_win_condition()
 
 		return result
@@ -234,6 +256,13 @@ func _execute_cast(action: ActionSystem.CastCardAction, targets: Array) -> Dicti
 	if action_system.execute_action(action, game_state):
 		var caster := game_state.get_champion(action.caster_id)
 
+		# Emit to EventBus for combat log
+		EventBus.card_played.emit(caster.owner_id, action.card_name, targets)
+		var card_data := CardDatabase.get_card(action.card_name)
+		var cost: int = card_data.get("cost", 0)
+		if cost > 0:
+			EventBus.mana_spent.emit(caster.owner_id, cost, action.card_name)
+
 		# Process card effects
 		var effect_result := effect_processor.process_card(
 			action.card_name,
@@ -256,6 +285,7 @@ func _execute_cast(action: ActionSystem.CastCardAction, targets: Array) -> Dicti
 		for champ: ChampionState in game_state.get_all_champions():
 			if champ.is_dead() and not BuffRegistry.check_cheat_death(champ):
 				champion_died.emit(champ.unique_id)
+				EventBus.champion_died.emit(champ.unique_id, action.caster_id)
 
 		_check_win_condition()
 
@@ -438,6 +468,7 @@ func _check_win_condition() -> void:
 		is_game_active = false
 		var reason := "All enemy champions defeated"
 		game_ended.emit(game_state.winner, reason)
+		EventBus.game_ended.emit(game_state.winner, reason)
 
 
 func _get_champion_names(player_id: int) -> Array:
@@ -454,10 +485,12 @@ func _on_turn_started(player_id: int, round_number: int) -> void:
 	# Check for startTurn responses
 	_check_trigger("startTurn", {"player": player_id, "round": round_number})
 	turn_started.emit(player_id, round_number)
+	EventBus.turn_started.emit(player_id, round_number)
 
 
 func _on_turn_ended(player_id: int) -> void:
 	turn_ended.emit(player_id)
+	EventBus.turn_ended.emit(player_id)
 
 
 func _on_phase_changed(phase: String) -> void:
@@ -467,6 +500,7 @@ func _on_phase_changed(phase: String) -> void:
 
 func _on_response_window_opened(trigger: String, context: Dictionary) -> void:
 	response_window_opened.emit(trigger, context)
+	EventBus.response_window_opened.emit(trigger, context)
 
 
 func _on_response_window_closed() -> void:

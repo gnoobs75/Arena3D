@@ -59,14 +59,30 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _setup_scene() -> void:
 	"""Create and position game elements."""
-	# Create board
+	# Layout constants - must match game_hud.gd
+	const MARGIN := 10
+	const PANEL_WIDTH := 220
+	const TOP_BAR_HEIGHT := 160
+	const TURN_INFO_HEIGHT := 90
+	const BOARD_WIDTH := 688  # 10*64 tiles + 24*2 coord margins
+
+	# Calculate centered board position
+	# Left panel ends at: MARGIN + PANEL_WIDTH = 230
+	# Right panel starts at: 1920 - MARGIN - PANEL_WIDTH = 1690
+	# Center area: 1460px wide
+	# Board X: 230 + (1460 - 688) / 2 = 616
+	# Board Y: Below top bar and turn info = 160 + 90 + margin
 	board = BOARD_SCENE.instantiate()
-	board.position = Vector2(320, 100)
+	board.position = Vector2(616, TOP_BAR_HEIGHT + TURN_INFO_HEIGHT + MARGIN)
 	add_child(board)
 
 	# Connect board signals
 	board.tile_clicked.connect(_on_tile_clicked)
 	board.champion_clicked.connect(_on_champion_clicked)
+
+	# Connect AnimationController to board for Battle Chess animations
+	if AnimationController:
+		AnimationController.set_board(board)
 
 	# Create HUD (CanvasLayer for UI elements)
 	hud = HUD_SCENE.instantiate()
@@ -105,8 +121,10 @@ func _start_game() -> void:
 	game_controller.champion_died.connect(_on_champion_died)
 	game_controller.game_ended.connect(_on_game_ended)
 
-	# Connect effect processor signal for immediate movements
+	# Connect effect processor signals for immediate movements and combat text
 	game_controller.effect_processor.immediate_movement_required.connect(_on_immediate_movement_required)
+	game_controller.effect_processor.damage_dealt.connect(_on_damage_dealt)
+	game_controller.effect_processor.healing_done.connect(_on_healing_done)
 
 	# Initialize AI for player 2
 	ai_controller = AIController.new(game_controller, 2)
@@ -186,6 +204,26 @@ func _on_champion_died(champion_id: String) -> void:
 	"""Handle champion death."""
 	hud.show_message("Champion defeated!")
 	board.update_champion_positions()
+
+
+func _on_damage_dealt(attacker_id: String, target_id: String, amount: int) -> void:
+	"""Show floating damage number when damage is dealt."""
+	var state := game_controller.get_game_state()
+	var target := state.get_champion(target_id)
+	if target and amount > 0:
+		var screen_pos := board.get_champion_screen_position(target_id)
+		if screen_pos != Vector2.ZERO:
+			hud.show_damage_number(amount, screen_pos)
+
+
+func _on_healing_done(source_id: String, target_id: String, amount: int) -> void:
+	"""Show floating heal number when healing is done."""
+	var state := game_controller.get_game_state()
+	var target := state.get_champion(target_id)
+	if target and amount > 0:
+		var screen_pos := board.get_champion_screen_position(target_id)
+		if screen_pos != Vector2.ZERO:
+			hud.show_heal_number(amount, screen_pos)
 
 
 func _on_game_ended(winner: int, reason: String) -> void:
@@ -286,6 +324,23 @@ func _on_tile_clicked(position: Vector2i) -> void:
 func _on_card_selected(card_name: String) -> void:
 	"""Handle selecting a card from hand."""
 	print("Game._on_card_selected: '%s', is_player_turn=%s" % [card_name, is_player_turn])
+
+	var card_data := CardDatabase.get_card(card_name)
+	var card_type: String = str(card_data.get("type", ""))
+
+	# Check if this is a response card during a response window
+	if card_type == "Response":
+		if not game_controller.response_stack.is_open():
+			print("Game: Response card but no response window open")
+			return
+		if game_controller.response_stack.get_priority_player() != 1:
+			print("Game: Response card but player doesn't have priority")
+			return
+		# Handle response card - check if it needs a target
+		_handle_response_card_selection(card_name, card_data)
+		return
+
+	# For non-response cards, must be player's turn
 	if not is_player_turn:
 		print("Game: Not player turn, ignoring card selection")
 		return
@@ -294,7 +349,6 @@ func _on_card_selected(card_name: String) -> void:
 	input_mode = InputMode.SELECT_CAST_TARGET
 
 	# Show valid targets
-	var card_data := CardDatabase.get_card(card_name)
 	var target_type: String = str(card_data.get("target", "none"))
 	print("Game: Card target type: '%s'" % target_type)
 
@@ -337,6 +391,61 @@ func _on_card_selected(card_name: String) -> void:
 			_try_cast_no_target()
 
 
+func _handle_response_card_selection(card_name: String, card_data: Dictionary) -> void:
+	"""Handle selection of a response card during response window."""
+	var target_type: String = str(card_data.get("target", "none"))
+	print("Game: Response card target type: '%s'" % target_type)
+
+	# For Tantrum and similar cards that target "enemy", we need to target the attacker
+	# from the trigger context
+	var context := game_controller.response_stack.get_trigger_context()
+
+	match target_type.to_lower():
+		"enemy":
+			# Target is typically the attacker from context
+			var attacker_id: String = context.get("attacker", "")
+			if attacker_id.is_empty():
+				print("Game: No attacker in context for enemy-targeted response")
+				return
+			_play_response_card(card_name, [attacker_id])
+		"self", "none":
+			# No explicit target needed
+			_play_response_card(card_name, [])
+		_:
+			# Default: try without targets
+			_play_response_card(card_name, [])
+
+
+func _play_response_card(card_name: String, targets: Array) -> void:
+	"""Play a response card."""
+	# Find a valid caster (any living champion of player 1)
+	var state := game_controller.get_game_state()
+	var caster_id := ""
+
+	# For character-specific responses, use the specific character
+	var card_data := CardDatabase.get_card(card_name)
+	var card_character: String = card_data.get("character", "")
+
+	for champ: ChampionState in state.get_champions(1):
+		if champ.is_alive():
+			if card_character.is_empty() or champ.champion_name == card_character:
+				caster_id = champ.unique_id
+				break
+
+	if caster_id.is_empty():
+		print("Game: No valid caster for response")
+		return
+
+	print("Game: Playing response '%s' with caster '%s' and targets %s" % [card_name, caster_id, targets])
+	var result := game_controller.play_response(1, card_name, caster_id, targets)
+
+	if result.get("success", false):
+		hud.show_message("Response played: " + card_name)
+		_update_ui()
+	else:
+		print("Game: Failed to play response: %s" % result.get("error", "unknown"))
+
+
 func _on_card_deselected() -> void:
 	"""Handle deselecting a card."""
 	selected_card = ""
@@ -350,17 +459,24 @@ func _select_champion(champion_id: String) -> void:
 	selected_champion_id = champion_id
 	board.select_champion(champion_id)
 
+	# Highlight the portrait in the HUD
+	hud.set_selected_champion(champion_id)
+
 	var state := game_controller.get_game_state()
 	var champion := state.get_champion(champion_id)
 
 	if champion == null:
 		return
 
-	# Show valid moves
+	# Show valid moves (green)
 	var valid_moves := game_controller.get_valid_moves(champion_id)
 	board.show_move_highlights(valid_moves)
 
-	# Show valid attack targets
+	# Show attack range (yellow) - all tiles in range
+	var range_tiles := _get_range_tiles(champion, state)
+	board.show_range_highlights(range_tiles)
+
+	# Show valid attack targets (red) - enemies in range
 	var valid_targets := game_controller.get_valid_attack_targets(champion_id)
 	var target_positions: Array[Vector2i] = []
 	for target_id: String in valid_targets:
@@ -370,6 +486,42 @@ func _select_champion(champion_id: String) -> void:
 	board.show_attack_highlights(target_positions)
 
 	input_mode = InputMode.SELECT_MOVE
+
+
+func _get_range_tiles(champion: ChampionState, state: GameState) -> Array[Vector2i]:
+	"""Get all tiles within the champion's attack range."""
+	var tiles: Array[Vector2i] = []
+	var pos: Vector2i = champion.position
+	var attack_range: int = champion.current_range
+	var is_melee: bool = attack_range <= 1
+
+	if is_melee:
+		# Melee: 8-directional (Chebyshev distance)
+		for dx in range(-attack_range, attack_range + 1):
+			for dy in range(-attack_range, attack_range + 1):
+				if dx == 0 and dy == 0:
+					continue
+				var tile: Vector2i = Vector2i(pos.x + dx, pos.y + dy)
+				if state.is_valid_position(tile):
+					tiles.append(tile)
+	else:
+		# Ranged: Adjacent squares (all 8) + cardinal directions at range
+		# First add all 8 adjacent tiles (melee range)
+		for dx in range(-1, 2):
+			for dy in range(-1, 2):
+				if dx == 0 and dy == 0:
+					continue
+				var tile: Vector2i = Vector2i(pos.x + dx, pos.y + dy)
+				if state.is_valid_position(tile):
+					tiles.append(tile)
+		# Then add cardinal directions beyond distance 1
+		for dir: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+			for dist in range(2, attack_range + 1):
+				var tile: Vector2i = pos + dir * dist
+				if state.is_valid_position(tile):
+					tiles.append(tile)
+
+	return tiles
 
 
 func _try_move(position: Vector2i) -> void:
@@ -490,6 +642,7 @@ func _reset_input_state() -> void:
 	input_mode = InputMode.SELECT_CHAMPION
 	board.clear_highlights()
 	hand_ui.clear_selection()
+	hud.clear_selection()  # Clear portrait highlighting
 
 
 func _on_end_turn_pressed() -> void:
@@ -572,7 +725,15 @@ func _update_ui() -> void:
 	# Update hand for player 1
 	var hand := state.get_hand(1)
 	var mana := state.get_mana(1)
-	hand_ui.update_hand(hand, mana)
+
+	# Check if response window is open and get valid responses for player 1
+	var valid_responses: Array[String] = []
+	if game_controller.response_stack.is_open():
+		var priority_player := game_controller.response_stack.get_priority_player()
+		if priority_player == 1:
+			valid_responses = game_controller.response_stack.get_valid_responses(1)
+
+	hand_ui.update_hand(hand, mana, valid_responses)
 
 	# Update discard pile for player 1
 	var discard := state.get_discard(1)

@@ -338,10 +338,41 @@ func _player_has_response(player_id: int, trigger: Trigger, context: Dictionary 
 			if not _has_valid_on_move_target(player_id, card_data, context):
 				continue
 
+		# For damage triggers, check character-specific requirements
+		if trigger == Trigger.BEFORE_DAMAGE or trigger == Trigger.AFTER_DAMAGE:
+			if not _is_valid_damage_response(player_id, card_data, context):
+				continue
+
 		# Has at least one valid response
 		return true
 
 	return false
+
+
+func _is_valid_damage_response(player_id: int, card_data: Dictionary, context: Dictionary) -> bool:
+	"""Check if a damage response card is valid for this context."""
+	var card_character: String = card_data.get("character", "")
+	var requires_alive: bool = card_data.get("requiresAlive", false)
+
+	# If the card is character-specific, check that the damaged champion matches
+	if not card_character.is_empty():
+		var target_id: String = context.get("target", "")
+		if target_id.is_empty():
+			return false
+
+		var target := game_state.get_champion(target_id)
+		if target == null:
+			return false
+
+		# The damaged champion must be the specific character this card belongs to
+		if target.champion_name != card_character:
+			return false
+
+		# If requiresAlive is set, the character must still be alive
+		if requires_alive and not target.is_alive():
+			return false
+
+	return true
 
 
 func _has_valid_on_move_target(player_id: int, card_data: Dictionary, context: Dictionary) -> bool:
@@ -367,7 +398,7 @@ func _has_valid_on_move_target(player_id: int, card_data: Dictionary, context: D
 		for champ: ChampionState in game_state.get_champions(player_id):
 			if not champ.is_alive():
 				continue
-			var distance := _get_distance(champ.board_position, mover.board_position)
+			var distance := _get_distance(champ.position, mover.position)
 			if distance <= card_range:
 				return true
 		return false
@@ -403,6 +434,16 @@ func get_valid_responses(player_id: int) -> Array[String]:
 		var cost: int = card_data.get("cost", 0)
 		if cost > mana:
 			continue
+
+		# For onMove, check if the moving enemy is actually in range
+		if _current_trigger == Trigger.ON_MOVE:
+			if not _has_valid_on_move_target(player_id, card_data, _trigger_context):
+				continue
+
+		# For damage triggers, check character-specific requirements
+		if _current_trigger == Trigger.BEFORE_DAMAGE or _current_trigger == Trigger.AFTER_DAMAGE:
+			if not _is_valid_damage_response(player_id, card_data, _trigger_context):
+				continue
 
 		valid.append(card_name)
 

@@ -166,8 +166,9 @@ func _apply_buff_effect(buff_name: String) -> void:
 			has_moved = false
 			movement_remaining = current_movement
 		"extraAttack":
-			# Grant an extra attack - reset attack state
-			has_attacked = false
+			# The buff itself grants the extra attack through can_attack()
+			# No need to reset has_attacked here
+			pass
 
 
 func remove_buff(buff_name: String) -> bool:
@@ -290,7 +291,8 @@ func can_attack() -> bool:
 		return false
 	if has_debuff("stunned"):
 		return false
-	return not has_attacked
+	# Can attack if hasn't attacked yet, OR has extraAttack buff
+	return not has_attacked or has_buff("extraAttack")
 
 
 func can_cast() -> bool:

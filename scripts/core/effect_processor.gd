@@ -62,24 +62,30 @@ func _process_single_effect(effect: Dictionary, caster: ChampionState, targets: 
 	# Get effect type - cards.json uses "type" field
 	var effect_type: String = str(effect.get("type", ""))
 
+	# For self-targeting cards, ensure caster is included in targets
+	var effective_targets := targets
+	var card_target_type: String = str(card_data.get("target", "")).to_lower()
+	if card_target_type == "self" and effective_targets.is_empty():
+		effective_targets = [caster.unique_id]
+
 	# Determine effect type and process
 	match effect_type.to_lower():
 		"damage":
-			result = _process_damage(effect, caster, targets)
+			result = _process_damage(effect, caster, effective_targets, card_data)
 		"heal":
-			result = _process_heal(effect, caster, targets)
+			result = _process_heal(effect, caster, effective_targets)
 		"statmod":
-			result = _process_stat_mod(effect, caster, targets)
+			result = _process_stat_mod(effect, caster, effective_targets)
 		"buff":
-			result = _process_buff(effect, caster, targets)
+			result = _process_buff(effect, caster, effective_targets)
 		"debuff":
-			result = _process_debuff(effect, caster, targets)
+			result = _process_debuff(effect, caster, effective_targets)
 		"move":
-			result = _process_move(effect, caster, targets)
+			result = _process_move(effect, caster, effective_targets)
 		"draw":
-			result = _process_draw(effect, caster, targets)
+			result = _process_draw(effect, caster, effective_targets)
 		"discard":
-			result = _process_discard(effect, caster, targets)
+			result = _process_discard(effect, caster, effective_targets)
 		"custom":
 			result = _process_custom(effect, caster, targets, card_data)
 		_:
@@ -98,11 +104,18 @@ func _process_single_effect(effect: Dictionary, caster: ChampionState, targets: 
 
 # --- Damage Processing ---
 
-func _process_damage(effect: Dictionary, caster: ChampionState, targets: Array) -> Dictionary:
+func _process_damage(effect: Dictionary, caster: ChampionState, targets: Array, card_data: Dictionary = {}) -> Dictionary:
 	# Support both new format (value) and old format (damage)
 	var damage_value = effect.get("value", effect.get("damage", 0))
 	var scope: String = str(effect.get("scope", "target"))
-	var actual_targets := _resolve_targets(scope, caster, targets)
+	var card_range: String = str(card_data.get("range", ""))
+	var effect_range: String = str(effect.get("range", ""))
+
+	# Handle AOE random damage (e.g., Rain of Arrows)
+	if scope == "random" and (card_range == "AOE" or effect_range == "AOE"):
+		return _process_aoe_random_damage(damage_value, caster, targets, card_data)
+
+	var actual_targets := _resolve_targets(scope, caster, targets, card_range)
 	var total_damage := 0
 
 	for target: ChampionState in actual_targets:
@@ -110,12 +123,85 @@ func _process_damage(effect: Dictionary, caster: ChampionState, targets: Array) 
 		var dealt := target.take_damage(amount)
 		total_damage += dealt
 		damage_dealt.emit(caster.unique_id, target.unique_id, dealt)
+		if dealt > 0:
+			EventBus.champion_damaged.emit(target.unique_id, dealt, caster.champion_name)
 
 	return {
 		"type": "damage",
 		"success": true,
 		"total_damage": total_damage,
 		"target_count": actual_targets.size()
+	}
+
+
+func _process_aoe_random_damage(damage_value, caster: ChampionState, targets: Array, card_data: Dictionary) -> Dictionary:
+	"""Handle AOE damage distributed randomly among targets in range of a position.
+	Used for cards like Rain of Arrows."""
+	var total_damage := _calculate_damage(damage_value, caster, caster)  # Calculate total damage pool
+	var aoe_radius: int = card_data.get("aoeRadius", 1)  # Default AOE radius
+
+	print("EffectProcessor: AOE random damage - total=%d, radius=%d, targets=%s" % [total_damage, aoe_radius, targets])
+
+	# Find the target position from targets array
+	var target_pos: Vector2i = Vector2i(-999, -999)  # Invalid sentinel
+	var found_position := false
+	if targets.size() > 0:
+		var first_target = targets[0]
+		if first_target is Vector2i:
+			target_pos = first_target
+			found_position = true
+		elif first_target is String:
+			# Try to parse as "x,y" format
+			var parts: PackedStringArray = first_target.split(",")
+			if parts.size() == 2:
+				target_pos = Vector2i(int(parts[0]), int(parts[1]))
+				found_position = true
+
+	if not found_position:
+		print("EffectProcessor: AOE damage - no valid target position in targets: %s" % [targets])
+		return {"type": "damage", "success": false, "error": "No target position"}
+
+	print("EffectProcessor: AOE target position: %s" % target_pos)
+
+	# Find all ENEMY champions within AOE range of target position
+	var opp_id := 2 if caster.owner_id == 1 else 1
+	var champions_in_aoe: Array[ChampionState] = []
+	for champ: ChampionState in game_state.get_champions(opp_id):
+		if champ.is_alive():
+			var dist: int = maxi(absi(champ.position.x - target_pos.x), absi(champ.position.y - target_pos.y))
+			print("EffectProcessor: Checking %s at %s, dist=%d from target" % [champ.champion_name, champ.position, dist])
+			if dist <= aoe_radius:
+				champions_in_aoe.append(champ)
+
+	if champions_in_aoe.is_empty():
+		print("EffectProcessor: AOE damage - no enemy champions in range")
+		return {"type": "damage", "success": true, "total_damage": 0, "target_count": 0}
+
+	# Distribute damage randomly among targets
+	var dealt_damage := 0
+	var damage_distribution: Dictionary = {}  # champion_id -> damage taken
+
+	for i in range(total_damage):
+		var random_target: ChampionState = champions_in_aoe[randi() % champions_in_aoe.size()]
+		var dealt := random_target.take_damage(1)
+		dealt_damage += dealt
+		damage_dealt.emit(caster.unique_id, random_target.unique_id, dealt)
+		if dealt > 0:
+			EventBus.champion_damaged.emit(random_target.unique_id, dealt, caster.champion_name)
+
+		# Track for summary
+		if not damage_distribution.has(random_target.unique_id):
+			damage_distribution[random_target.unique_id] = 0
+		damage_distribution[random_target.unique_id] += dealt
+
+	print("EffectProcessor: AOE random damage - distributed %d damage to %d targets: %s" % [dealt_damage, champions_in_aoe.size(), damage_distribution])
+
+	return {
+		"type": "damage",
+		"success": true,
+		"total_damage": dealt_damage,
+		"target_count": champions_in_aoe.size(),
+		"distribution": damage_distribution
 	}
 
 
@@ -155,6 +241,8 @@ func _process_heal(effect: Dictionary, caster: ChampionState, targets: Array) ->
 		var healed := target.heal(amount)
 		total_healed += healed
 		healing_done.emit(caster.unique_id, target.unique_id, healed)
+		if healed > 0:
+			EventBus.champion_healed.emit(target.unique_id, healed, caster.champion_name)
 
 	return {
 		"type": "heal",
@@ -241,6 +329,7 @@ func _process_buff(effect: Dictionary, caster: ChampionState, targets: Array) ->
 	for target: ChampionState in actual_targets:
 		target.add_buff(buff_name, duration_value, stacks, caster.unique_id)
 		buff_applied.emit(target.unique_id, buff_name, duration_value)
+		EventBus.champion_buff_applied.emit(target.unique_id, buff_name, duration_value)
 
 		# Special handling for buffs that need game_state access
 		match buff_name:
@@ -276,6 +365,7 @@ func _process_debuff(effect: Dictionary, caster: ChampionState, targets: Array) 
 	for target: ChampionState in actual_targets:
 		target.add_debuff(debuff_name, duration_value, stacks, caster.unique_id)
 		debuff_applied.emit(target.unique_id, debuff_name, duration_value)
+		EventBus.champion_debuff_applied.emit(target.unique_id, debuff_name, duration_value)
 
 	return {
 		"type": "debuff",
@@ -348,8 +438,8 @@ func _calculate_move_destination(move_type: String, caster: ChampionState, targe
 			if not adjacent.is_empty():
 				return adjacent[0]
 		"toWall":
-			# Push toward nearest wall
-			return _find_wall_push_destination(target)
+			# Push away from caster until hitting a wall
+			return _find_wall_push_destination(target, caster)
 		"corner":
 			# Move to nearest corner
 			return _find_nearest_corner(target)
@@ -389,26 +479,55 @@ func _calculate_push_away(from: Vector2i, current: Vector2i, distance: int) -> V
 	return current
 
 
-func _find_wall_push_destination(target: ChampionState) -> Vector2i:
-	"""Find destination when pushing toward wall."""
-	var pos: Vector2i = target.position
-	var best_dist: int = 999
-	var best_pos: Vector2i = pos
+func _find_wall_push_destination(target: ChampionState, caster: ChampionState) -> Vector2i:
+	"""Find destination when pushing away from caster until hitting a wall or edge."""
+	var target_pos: Vector2i = target.position
+	var caster_pos: Vector2i = caster.position
 
-	# Check each direction to wall
-	for dir: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
-		var check: Vector2i = pos
-		var dist := 0
-		while game_state.is_valid_position(check + dir):
-			check += dir
-			dist += 1
-			if game_state.get_terrain(check) == GameState.Terrain.WALL:
-				if dist < best_dist and game_state.is_walkable(check - dir):
-					best_dist = dist
-					best_pos = check - dir
-				break
+	# Calculate push direction (away from caster)
+	var dx: int = target_pos.x - caster_pos.x
+	var dy: int = target_pos.y - caster_pos.y
 
-	return best_pos
+	# Determine primary push direction (cardinal only)
+	var push_dir: Vector2i = Vector2i.ZERO
+	if absi(dx) >= absi(dy):
+		# Push horizontally (or if equal, prefer horizontal)
+		push_dir = Vector2i(1, 0) if dx >= 0 else Vector2i(-1, 0)
+	else:
+		# Push vertically
+		push_dir = Vector2i(0, 1) if dy >= 0 else Vector2i(0, -1)
+
+	# If caster and target are at same position (shouldn't happen), default to right
+	if push_dir == Vector2i.ZERO:
+		push_dir = Vector2i(1, 0)
+
+	# Push target in direction until hitting wall, edge, or another champion
+	var current: Vector2i = target_pos
+	var last_valid: Vector2i = target_pos
+
+	while true:
+		var next: Vector2i = current + push_dir
+
+		# Check if next position is valid and walkable (can pass over pits)
+		if not game_state.is_valid_position(next):
+			break  # Hit edge of map
+
+		var terrain := game_state.get_terrain(next)
+		if terrain == GameState.Terrain.WALL:
+			break  # Hit a wall
+
+		# Check for another champion blocking
+		var occupant := game_state.get_champion_at(next)
+		if occupant != null and occupant.unique_id != target.unique_id:
+			break  # Hit another champion
+
+		# Can move to this position (even if it's a pit - they pass over)
+		if terrain != GameState.Terrain.PIT:
+			last_valid = next
+
+		current = next
+
+	return last_valid
 
 
 func _find_nearest_corner(target: ChampionState) -> Vector2i:
@@ -792,7 +911,7 @@ func _handle_bear_tank(caster: ChampionState, targets: Array) -> Dictionary:
 
 # --- Helper Functions ---
 
-func _resolve_targets(scope: String, caster: ChampionState, explicit_targets: Array) -> Array[ChampionState]:
+func _resolve_targets(scope: String, caster: ChampionState, explicit_targets: Array, card_range: String = "") -> Array[ChampionState]:
 	"""Resolve target list based on scope."""
 	var targets: Array[ChampionState] = []
 
@@ -808,11 +927,16 @@ func _resolve_targets(scope: String, caster: ChampionState, explicit_targets: Ar
 			for champ: ChampionState in game_state.get_champions(caster.owner_id):
 				if champ.is_alive():
 					targets.append(champ)
-		"allenemies":
+		"allenemies", "enemies":
 			var opp_id := 2 if caster.owner_id == 1 else 1
 			for champ: ChampionState in game_state.get_champions(opp_id):
 				if champ.is_alive():
-					targets.append(champ)
+					# If card has "range": "self", filter by caster's attack range
+					if card_range == "self":
+						if _is_in_attack_range(caster, champ):
+							targets.append(champ)
+					else:
+						targets.append(champ)
 		"all":
 			# Check if we have a direction in explicit_targets
 			if explicit_targets.size() > 0:
@@ -889,3 +1013,32 @@ func _parse_duration(duration_str: String) -> int:
 			if duration_str.is_valid_int():
 				return duration_str.to_int()
 			return -1
+
+
+func _is_in_attack_range(caster: ChampionState, target: ChampionState) -> bool:
+	"""Check if target is within caster's attack range using range rules."""
+	if caster.unique_id == target.unique_id:
+		return true  # Self is always in range
+
+	var from: Vector2i = caster.position
+	var to: Vector2i = target.position
+	var dx: int = to.x - from.x
+	var dy: int = to.y - from.y
+	var chebyshev_dist: int = maxi(absi(dx), absi(dy))
+	var is_melee: bool = caster.current_range <= 1
+
+	if is_melee:
+		# Melee: Chebyshev distance (8 directions)
+		return chebyshev_dist <= caster.current_range
+	else:
+		# Ranged: Adjacent squares (all 8 directions) PLUS cardinal directions at range
+		# Distance 1 is always valid (melee range for ranged units)
+		if chebyshev_dist == 1:
+			return true
+
+		# Beyond distance 1: must be in cardinal direction and within range
+		if dx != 0 and dy != 0:
+			return false
+
+		var cardinal_dist: int = absi(dx) + absi(dy)
+		return cardinal_dist <= caster.current_range

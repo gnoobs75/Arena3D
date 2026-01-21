@@ -23,6 +23,8 @@ EventBus="*res://scripts/autoload/event_bus.gd"
 CardDatabase="*res://scripts/autoload/card_database.gd"
 AudioManager="*res://scripts/autoload/audio_manager.gd"
 GameManager="*res://scripts/autoload/game_manager.gd"
+CombatLog="*res://scripts/autoload/combat_log.gd"
+AnimationController="*res://scripts/autoload/animation_controller.gd"
 
 [display]
 

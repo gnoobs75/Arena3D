@@ -4,6 +4,8 @@ extends Node
 
 var status_label: Label = null
 var ai_test_running: bool = false
+var splash_screen: SplashScreen = null
+var database_ready: bool = false
 
 
 func _ready() -> void:
@@ -93,10 +95,38 @@ func _on_database_loaded() -> void:
 		var stats := CardDatabase.get_champion_stats(champion_name)
 		print("  %s: %d cards in deck, stats=%s" % [champion_name, deck_size, stats])
 
-	# Quick start - go directly to game for testing
-	print("Main: Waiting 0.5s before starting game...")
-	await get_tree().create_timer(0.5).timeout
-	print("Main: Starting game")
+	database_ready = true
+
+	# Show splash screen
+	print("Main: Showing splash screen...")
+	_show_splash_screen()
+
+
+func _show_splash_screen() -> void:
+	"""Show the splash screen with Enter Arena button."""
+	# Hide the loading UI
+	var ui = get_node_or_null("UI")
+	if ui:
+		ui.visible = false
+
+	# Load and add splash screen
+	var splash_scene := preload("res://scenes/main/splash_screen.tscn")
+	splash_screen = splash_scene.instantiate()
+	splash_screen.enter_game_pressed.connect(_on_enter_game_pressed)
+	add_child(splash_screen)
+	print("Main: Splash screen displayed")
+
+
+func _on_enter_game_pressed() -> void:
+	"""Handle Enter Arena button press."""
+	print("Main: Enter Arena pressed!")
+
+	# Remove splash screen
+	if splash_screen and is_instance_valid(splash_screen):
+		splash_screen.queue_free()
+		splash_screen = null
+
+	# Start the game
 	_start_game()
 
 

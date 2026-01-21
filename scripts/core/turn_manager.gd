@@ -94,8 +94,14 @@ func _execute_end_phase() -> void:
 	# Discard down to hand limit (7)
 	_enforce_hand_limit(player_id)
 
-	# Clear thisTurn effects
+	# Tick effects on current player's champions to decrement durations
+	# This ensures "nextTurn" debuffs on enemies last through their full turn
+	# Example: P1 applies "nextTurn" debuff to P2's champion
+	# - End of P1's turn: no tick (debuff on P2's champ)
+	# - P2's turn: debuff is active
+	# - End of P2's turn: tick removes the debuff
 	for champion: ChampionState in game_state.get_champions(player_id):
+		champion.tick_effects()
 		champion.clear_this_turn_effects()
 
 	# Clear temporary terrain (Pit of Despair pits, etc.)

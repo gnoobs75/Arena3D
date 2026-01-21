@@ -1,7 +1,7 @@
 extends Control
 class_name CardVisual
-## CardVisual - Beautiful visual representation of a card
-## Features styled borders, champion colors, mana gems, and hover effects
+## CardVisual - Card display using character art as background
+## Overlays: Cost (top-right), Name (top-middle), Description (bottom)
 
 signal card_clicked(card_name: String)
 signal card_hovered(card_name: String)
@@ -9,6 +9,11 @@ signal card_unhovered(card_name: String)
 
 const HOVER_LIFT := 30
 const HOVER_SCALE := 1.05
+const CHARACTER_ART_PATH := "res://assets/art/characters/"
+
+# UI overlay colors
+const OVERLAY_BG := Color(0.1, 0.1, 0.12, 0.85)
+const OVERLAY_BORDER := Color(0.4, 0.4, 0.45, 0.9)
 
 var card_name: String = ""
 var card_data: Dictionary = {}
@@ -16,6 +21,7 @@ var is_playable: bool = true
 var is_hovered: bool = false
 var is_face_down: bool = false
 var original_position: Vector2 = Vector2.ZERO
+var character_texture: Texture2D = null
 
 # Deferred setup data
 var _pending_setup: bool = false
@@ -59,7 +65,30 @@ func _do_setup(card_name_: String, playable: bool, face_down: bool) -> void:
 	card_data = CardDatabase.get_card(card_name)
 	is_playable = playable
 	is_face_down = face_down
+
+	# Load character art texture
+	character_texture = _load_character_art()
+
 	queue_redraw()
+
+
+func _load_character_art() -> Texture2D:
+	"""Load the character art texture for this card's champion."""
+	if card_data.is_empty():
+		return null
+
+	var champion: String = card_data.get("character", "")
+	if champion.is_empty():
+		return null
+
+	var full_path := CHARACTER_ART_PATH + champion + ".png"
+
+	# Try to load the texture
+	if ResourceLoader.exists(full_path):
+		return load(full_path)
+	else:
+		print("CardVisual: Missing character art for '%s'" % champion)
+		return null
 
 
 func set_playable(playable: bool) -> void:
@@ -152,7 +181,7 @@ func _draw_corner_flourish(pos: Vector2, corner: int) -> void:
 
 
 func _draw_card_front() -> void:
-	"""Draw the card front with all details."""
+	"""Draw card with character art background and overlaid UI elements."""
 	if card_data.is_empty():
 		_draw_placeholder()
 		return
@@ -162,111 +191,114 @@ func _draw_card_front() -> void:
 	var card_type: String = card_data.get("type", "Action")
 	var champion: String = card_data.get("character", "")
 	var cost: int = card_data.get("cost", 0)
+	var font := ThemeDB.fallback_font
 
+	# Get colors for card type border
 	var type_colors := VisualTheme.get_card_type_colors(card_type)
-	var champ_colors := VisualTheme.get_champion_colors(champion)
-
-	# Adjust colors if not playable
-	var primary_color: Color = type_colors["primary"]
-	var secondary_color: Color = type_colors["secondary"]
 	var border_color: Color = type_colors["border"]
-
 	if not is_playable:
-		primary_color = primary_color.lerp(Color(0.25, 0.25, 0.25), 0.65)
-		secondary_color = secondary_color.lerp(Color(0.3, 0.3, 0.3), 0.65)
 		border_color = border_color.lerp(Color(0.2, 0.2, 0.2), 0.65)
 
-	# === CARD FRAME ===
-	# Outer border
+	# === CARD BORDER ===
 	draw_rect(Rect2(0, 0, w, h), border_color)
 
-	# Main background
-	var main_rect := Rect2(2, 2, w - 4, h - 4)
-	draw_rect(main_rect, primary_color)
+	# === CHARACTER ART BACKGROUND ===
+	var art_rect := Rect2(2, 2, w - 4, h - 4)
 
-	# === HEADER SECTION (champion color accent) ===
-	var header_height := 24.0
-	var header_color: Color = champ_colors["primary"] if is_playable else champ_colors["primary"].lerp(Color(0.3, 0.3, 0.3), 0.5)
-	draw_rect(Rect2(2, 2, w - 4, header_height), header_color)
+	if character_texture != null:
+		# Draw character art as full card background
+		var tex_size := character_texture.get_size()
 
-	# === MANA COST GEM ===
-	_draw_mana_gem(Vector2(16, 14), cost)
+		# Scale to fill the card (crop if needed)
+		var scale_x := art_rect.size.x / tex_size.x
+		var scale_y := art_rect.size.y / tex_size.y
+		var scale_factor := maxf(scale_x, scale_y)  # Use max to fill
 
-	# === TYPE BADGE ===
-	var type_badge_x := w - 8.0
-	var type_short := card_type.substr(0, 1)  # A, R, or E
-	var font := ThemeDB.fallback_font
-	var badge_color := secondary_color if is_playable else secondary_color.lerp(Color(0.3, 0.3, 0.3), 0.5)
-	draw_circle(Vector2(type_badge_x - 10, 14), 8, badge_color)
-	draw_string(font, Vector2(type_badge_x - 14, 18), type_short, HORIZONTAL_ALIGNMENT_CENTER, -1, 10, Color.WHITE)
+		var scaled_size := tex_size * scale_factor
+		var offset := (art_rect.size - scaled_size) / 2.0
+		var draw_pos := art_rect.position + offset
 
-	# === ART AREA ===
-	var art_top := header_height + 4
-	var art_height := 50.0
-	var art_rect := Rect2(6, art_top, w - 12, art_height)
+		# Apply dim effect if not playable
+		var modulate_color := Color.WHITE if is_playable else Color(0.4, 0.4, 0.4)
+		draw_texture_rect(character_texture, Rect2(draw_pos, scaled_size), false, modulate_color)
+	else:
+		# Fallback: solid color background
+		var champ_colors := VisualTheme.get_champion_colors(champion)
+		var bg_color: Color = champ_colors["primary"].lerp(Color(0.1, 0.1, 0.1), 0.5)
+		if not is_playable:
+			bg_color = bg_color.lerp(Color(0.2, 0.2, 0.2), 0.6)
+		draw_rect(art_rect, bg_color)
 
-	# Gradient background for art area
-	var art_color1: Color = champ_colors["primary"].lerp(Color(0.1, 0.1, 0.1), 0.3)
-	var art_color2: Color = champ_colors["secondary"].lerp(Color(0.1, 0.1, 0.1), 0.3)
-	if not is_playable:
-		art_color1 = art_color1.lerp(Color(0.2, 0.2, 0.2), 0.6)
-		art_color2 = art_color2.lerp(Color(0.25, 0.25, 0.25), 0.6)
+	# === COST OVERLAY (Top Right) ===
+	var cost_size := 28.0
+	var cost_margin := 6.0
+	var cost_rect := Rect2(w - cost_size - cost_margin, cost_margin, cost_size, cost_size)
 
-	draw_rect(art_rect, art_color1)
+	# Background circle
+	var cost_center := cost_rect.position + Vector2(cost_size / 2, cost_size / 2)
+	var cost_bg_color := OVERLAY_BG if is_playable else Color(0.15, 0.15, 0.18, 0.9)
+	draw_circle(cost_center, cost_size / 2, cost_bg_color)
+	draw_arc(cost_center, cost_size / 2, 0, TAU, 32, OVERLAY_BORDER, 2.0)
 
-	# Champion symbol in center of art area
-	var symbol := VisualTheme.get_champion_symbol(champion)
-	var symbol_pos := Vector2(w / 2 - 8, art_top + art_height / 2 + 10)
-	var symbol_color: Color = champ_colors["secondary"] if is_playable else Color(0.4, 0.4, 0.4)
-	draw_string(font, symbol_pos, symbol, HORIZONTAL_ALIGNMENT_CENTER, -1, 28, symbol_color)
+	# Cost number
+	var cost_str := str(cost)
+	var cost_text_size := font.get_string_size(cost_str, HORIZONTAL_ALIGNMENT_CENTER, -1, 16)
+	var cost_text_pos := cost_center + Vector2(-cost_text_size.x / 2, 6)
+	var cost_color := Color(1.0, 0.9, 0.5) if is_playable else Color(0.5, 0.5, 0.5)
+	draw_string(font, cost_text_pos, cost_str, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cost_color)
 
-	# Art area border
-	draw_rect(art_rect, border_color, false, 1.0)
+	# === NAME OVERLAY (Top Middle) ===
+	var name_margin := 4.0
+	var name_height := 22.0
+	var name_width := w - cost_size - cost_margin * 2 - name_margin * 2
+	var name_rect := Rect2(name_margin, name_margin, name_width, name_height)
 
-	# === NAME SECTION ===
-	var name_top := art_top + art_height + 2
-	var name_height := 20.0
-	var name_rect := Rect2(4, name_top, w - 8, name_height)
-	draw_rect(name_rect, secondary_color.lerp(Color.BLACK, 0.3))
+	# Background
+	draw_rect(name_rect, OVERLAY_BG)
+	draw_rect(name_rect, OVERLAY_BORDER, false, 1.0)
 
+	# Card name text
 	var card_name_text: String = card_data.get("name", "Unknown")
-	if card_name_text.length() > 14:
-		card_name_text = card_name_text.substr(0, 13) + ".."
-	var name_text_width := font.get_string_size(card_name_text, HORIZONTAL_ALIGNMENT_CENTER, -1, VisualTheme.FONT_CARD_NAME).x
-	draw_string(font, Vector2((w - name_text_width) / 2, name_top + 14), card_name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, VisualTheme.FONT_CARD_NAME, Color.WHITE)
+	if card_name_text.length() > 16:
+		card_name_text = card_name_text.substr(0, 15) + ".."
+	var name_color := Color.WHITE if is_playable else Color(0.6, 0.6, 0.6)
+	var name_text_pos := Vector2(name_margin + 4, name_margin + 16)
+	draw_string(font, name_text_pos, card_name_text, HORIZONTAL_ALIGNMENT_LEFT, int(name_width) - 8, 12, name_color)
 
-	# === DESCRIPTION SECTION ===
-	var desc_top := name_top + name_height + 2
-	var desc_rect := Rect2(4, desc_top, w - 8, h - desc_top - 4)
-	draw_rect(desc_rect, primary_color.lerp(Color.BLACK, 0.15))
-	draw_rect(desc_rect, border_color, false, 1.0)
+	# === TYPE INDICATOR (small badge next to name) ===
+	var type_short := card_type.substr(0, 1)  # A, R, or E
+	var type_badge_pos := Vector2(name_rect.end.x - 16, name_margin + 15)
+	var type_color: Color
+	match card_type:
+		"Action":
+			type_color = Color(0.3, 0.6, 0.9) if is_playable else Color(0.3, 0.3, 0.4)
+		"Response":
+			type_color = Color(0.9, 0.6, 0.3) if is_playable else Color(0.4, 0.3, 0.3)
+		"Equipment":
+			type_color = Color(0.6, 0.9, 0.3) if is_playable else Color(0.3, 0.4, 0.3)
+		_:
+			type_color = Color(0.6, 0.6, 0.6)
+	draw_string(font, type_badge_pos, type_short, HORIZONTAL_ALIGNMENT_CENTER, -1, 10, type_color)
+
+	# === DESCRIPTION OVERLAY (Bottom) ===
+	var desc_margin := 4.0
+	var desc_height := 70.0
+	var desc_rect := Rect2(desc_margin, h - desc_height - desc_margin, w - desc_margin * 2, desc_height)
+
+	# Background
+	draw_rect(desc_rect, OVERLAY_BG)
+	draw_rect(desc_rect, OVERLAY_BORDER, false, 1.0)
 
 	# Description text (wrapped)
 	var desc: String = card_data.get("description", "")
-	_draw_wrapped_text(desc, Rect2(8, desc_top + 4, w - 16, desc_rect.size.y - 8), VisualTheme.FONT_CARD_DESC)
+	var desc_text_rect := Rect2(desc_rect.position.x + 4, desc_rect.position.y + 2, desc_rect.size.x - 8, desc_rect.size.y - 4)
+	_draw_wrapped_text(desc, desc_text_rect, 9)
 
 	# === PLAYABILITY INDICATOR ===
 	if is_playable and is_hovered:
 		# Glow effect when playable and hovered
-		draw_rect(Rect2(0, 0, w, h), Color(1, 1, 0.7, 0.15))
-
-
-func _draw_mana_gem(center: Vector2, cost: int) -> void:
-	"""Draw a mana cost gem."""
-	var gem_color := VisualTheme.get_mana_cost_color(cost)
-	var dark_color := gem_color.lerp(Color.BLACK, 0.4)
-
-	# Outer circle (border)
-	draw_circle(center, 10, dark_color)
-	# Inner circle (gem)
-	draw_circle(center, 8, gem_color)
-	# Highlight
-	draw_arc(center + Vector2(-2, -2), 5, deg_to_rad(200), deg_to_rad(340), 8, gem_color.lerp(Color.WHITE, 0.5), 1.5)
-
-	# Cost number
-	var font := ThemeDB.fallback_font
-	var cost_str := str(cost)
-	draw_string(font, center + Vector2(-4, 5), cost_str, HORIZONTAL_ALIGNMENT_CENTER, -1, VisualTheme.FONT_CARD_COST, Color.WHITE)
+		draw_rect(Rect2(0, 0, w, h), Color(1, 1, 0.7, 0.2))
+		draw_rect(Rect2(0, 0, w, h), Color(1, 1, 0.5, 0.8), false, 2.0)
 
 
 func _draw_wrapped_text(text: String, rect: Rect2, font_size: int) -> void:
@@ -294,7 +326,7 @@ func _draw_wrapped_text(text: String, rect: Rect2, font_size: int) -> void:
 	# Draw lines
 	var y := rect.position.y + line_height
 	var max_lines := int(rect.size.y / line_height)
-	var text_color := Color(0.85, 0.85, 0.85) if is_playable else Color(0.5, 0.5, 0.5)
+	var text_color := Color(0.9, 0.9, 0.9) if is_playable else Color(0.5, 0.5, 0.5)
 
 	for i in range(mini(lines.size(), max_lines)):
 		var line := lines[i]

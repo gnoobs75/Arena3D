@@ -140,12 +140,25 @@ class AttackAction extends Action:
 		# Store undo data
 		undo_data = {
 			"target_hp": target.current_hp,
-			"has_attacked": attacker.has_attacked
+			"has_attacked": attacker.has_attacked,
+			"had_extra_attack": attacker.has_buff("extraAttack")
 		}
 
 		# Deal damage
 		damage_dealt = target.take_damage(attacker.current_power)
-		attacker.has_attacked = true
+
+		# Check for extra attack buff
+		if not attacker.has_attacked:
+			# First attack of the turn - just mark as attacked
+			attacker.has_attacked = true
+		elif attacker.has_buff("extraAttack"):
+			# Already attacked once, but has extra attack buff - consume it
+			attacker.remove_buff("extraAttack")
+			# has_attacked stays true, but we allowed this attack
+		else:
+			# No extra attack available - this shouldn't happen if is_valid was checked
+			attacker.has_attacked = true
+
 		executed = true
 
 		# Check for leech
@@ -166,6 +179,11 @@ class AttackAction extends Action:
 
 		target.current_hp = undo_data.get("target_hp", target.max_hp)
 		attacker.has_attacked = undo_data.get("has_attacked", false)
+
+		# Restore extraAttack buff if it was consumed
+		if undo_data.get("had_extra_attack", false) and not attacker.has_buff("extraAttack"):
+			attacker.add_buff("extraAttack", 0, 1, "undo")
+
 		executed = false
 
 		return true
