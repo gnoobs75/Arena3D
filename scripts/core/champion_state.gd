@@ -29,6 +29,13 @@ var has_moved: bool = false
 var has_attacked: bool = false
 var movement_remaining: int = 0
 
+# Damage tracking (for Second Wind, etc.)
+var damage_taken_this_turn: int = 0
+var damage_taken_last_turn: int = 0
+
+# Death tracking (prevents processing death multiple times)
+var death_processed: bool = false
+
 # Buffs and Debuffs
 # Format: {"buff_name": {"duration": int, "stacks": int, "source": String}}
 var buffs: Dictionary = {}
@@ -85,6 +92,9 @@ func duplicate() -> ChampionState:
 	copy.has_moved = has_moved
 	copy.has_attacked = has_attacked
 	copy.movement_remaining = movement_remaining
+	copy.damage_taken_this_turn = damage_taken_this_turn
+	copy.damage_taken_last_turn = damage_taken_last_turn
+	copy.death_processed = death_processed
 
 	# Deep copy dictionaries
 	copy.buffs = _deep_copy_dict(buffs)
@@ -120,11 +130,18 @@ func take_damage(amount: int) -> int:
 
 	var actual_damage := maxi(0, amount)
 	current_hp = maxi(0, current_hp - actual_damage)
+
+	# Track damage for effects like Second Wind
+	damage_taken_this_turn += actual_damage
+
 	return actual_damage
 
 
 func heal(amount: int) -> int:
 	"""Apply healing and return actual amount healed."""
+	# Check for noHeal debuff (Mutually Assured Destruction)
+	if has_debuff("noHeal"):
+		return 0
 	var actual_heal := mini(amount, max_hp - current_hp)
 	current_hp = mini(max_hp, current_hp + actual_heal)
 	return actual_heal
@@ -257,6 +274,25 @@ func _recalculate_stats() -> void:
 	current_range = base_range
 	current_movement = base_movement
 
+	# Check for powerLocked debuff (Underworld Terror) - power is locked at 0
+	if has_debuff("powerLocked"):
+		current_power = 0
+		# Still apply range and movement, but skip power buffs
+		if has_buff("rangeBonus"):
+			current_range += get_buff_stacks("rangeBonus")
+		if has_buff("movementBonus"):
+			current_movement += get_buff_stacks("movementBonus")
+		if has_buff("movementSpeedBonus"):
+			current_movement += get_buff_stacks("movementSpeedBonus")
+		# Apply debuff modifiers (except power)
+		if has_debuff("rangeReduction"):
+			current_range = maxi(1, current_range - get_debuff_stacks("rangeReduction"))
+		if has_debuff("movementReduction"):
+			current_movement = maxi(0, current_movement - get_debuff_stacks("movementReduction"))
+		if has_debuff("movementSpeedReduction"):
+			current_movement = maxi(0, current_movement - get_debuff_stacks("movementSpeedReduction"))
+		return
+
 	# Apply buff modifiers
 	if has_buff("powerBonus"):
 		current_power += get_buff_stacks("powerBonus")
@@ -264,10 +300,20 @@ func _recalculate_stats() -> void:
 		current_range += get_buff_stacks("rangeBonus")
 	if has_buff("movementBonus"):
 		current_movement += get_buff_stacks("movementBonus")
+	# Cards use "movementSpeed" which creates "movementSpeedBonus"
+	if has_buff("movementSpeedBonus"):
+		current_movement += get_buff_stacks("movementSpeedBonus")
 
 	# Apply debuff modifiers
 	if has_debuff("powerReduction"):
 		current_power = maxi(0, current_power - get_debuff_stacks("powerReduction"))
+	if has_debuff("rangeReduction"):
+		current_range = maxi(1, current_range - get_debuff_stacks("rangeReduction"))
+	if has_debuff("movementReduction"):
+		current_movement = maxi(0, current_movement - get_debuff_stacks("movementReduction"))
+	# Cards use "movementSpeed" which creates "movementSpeedReduction"
+	if has_debuff("movementSpeedReduction"):
+		current_movement = maxi(0, current_movement - get_debuff_stacks("movementSpeedReduction"))
 
 
 func get_debuff_stacks(debuff_name: String) -> int:
@@ -283,6 +329,10 @@ func can_move() -> bool:
 		return false
 	if has_debuff("stunned"):
 		return false
+	if has_debuff("rooted"):
+		return false
+	if has_debuff("hypnotized"):
+		return false
 	return not has_moved and movement_remaining > 0
 
 
@@ -290,6 +340,10 @@ func can_attack() -> bool:
 	if has_debuff("canAttack"):
 		return false
 	if has_debuff("stunned"):
+		return false
+	if has_debuff("disarmed"):
+		return false
+	if has_debuff("hypnotized"):
 		return false
 	# Can attack if hasn't attacked yet, OR has extraAttack buff
 	return not has_attacked or has_buff("extraAttack")
@@ -310,6 +364,10 @@ func reset_turn() -> void:
 	has_moved = false
 	has_attacked = false
 	movement_remaining = current_movement
+
+	# Move this turn's damage to last turn for effects like Second Wind
+	damage_taken_last_turn = damage_taken_this_turn
+	damage_taken_this_turn = 0
 
 
 # --- Equipment ---

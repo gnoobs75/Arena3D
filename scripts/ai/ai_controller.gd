@@ -42,6 +42,9 @@ var profile: Dictionary
 var player_id: int = 2
 var game_controller: GameController
 
+# Track actions per champion to balance between them
+var _champion_action_count: Dictionary = {}  # champion_id -> action count this turn
+
 
 func _init(controller: GameController, player: int = 2) -> void:
 	game_controller = controller
@@ -58,6 +61,12 @@ func set_difficulty(diff: Difficulty) -> void:
 func take_turn() -> void:
 	"""Execute AI turn - make decisions and perform actions."""
 	thinking_started.emit()
+
+	# Reset action tracking for new turn
+	_champion_action_count.clear()
+
+	# Manage response slot at start of turn
+	_manage_response_slot()
 
 	var actions_taken := 0
 	var max_actions := 20  # Safety limit
@@ -88,6 +97,11 @@ func take_turn() -> void:
 			actions_taken += 1
 			consecutive_failures = 0  # Reset on success
 			action_chosen.emit(action)
+
+			# Track action for this champion
+			var champ_id: String = action.get("champion", "")
+			if not champ_id.is_empty():
+				_champion_action_count[champ_id] = _champion_action_count.get(champ_id, 0) + 1
 		else:
 			consecutive_failures += 1
 			print("AI: Action failed (%d consecutive failures)" % consecutive_failures)
@@ -110,20 +124,41 @@ func _choose_action() -> Dictionary:
 	# Get all valid actions
 	var valid_actions := _get_all_valid_actions(state)
 
-	# Debug: count action types
-	var move_count := 0
-	var attack_count := 0
-	var cast_count := 0
+	# Debug: count action types per champion
+	var champ_actions: Dictionary = {}  # champ_id -> {move: int, attack: int, cast: int}
 	for action: Dictionary in valid_actions:
-		match action.get("type", ""):
-			"move": move_count += 1
-			"attack": attack_count += 1
-			"cast": cast_count += 1
-	print("AI: Found %d valid actions (moves: %d, attacks: %d, casts: %d)" % [valid_actions.size(), move_count, attack_count, cast_count])
+		var champ_id: String = action.get("champion", "unknown")
+		if not champ_actions.has(champ_id):
+			champ_actions[champ_id] = {"move": 0, "attack": 0, "cast": 0}
+		var action_type: String = action.get("type", "")
+		if champ_actions[champ_id].has(action_type):
+			champ_actions[champ_id][action_type] += 1
+
+	print("AI: Found %d valid actions:" % valid_actions.size())
+	for champ_id: String in champ_actions:
+		var counts: Dictionary = champ_actions[champ_id]
+		var champ := state.get_champion(champ_id)
+		var name: String = champ.champion_name if champ else champ_id
+		print("  %s: moves=%d, attacks=%d, casts=%d (actions taken: %d)" % [
+			name, counts["move"], counts["attack"], counts["cast"],
+			_champion_action_count.get(champ_id, 0)
+		])
 
 	if valid_actions.is_empty():
 		print("AI: No valid actions, ending turn")
 		return {"type": "end_turn"}
+
+	# Strategic check: don't end turn if one champion hasn't done anything useful
+	# Filter actions to prioritize inactive champions
+	var dominated_by_one_champ := _check_champion_imbalance(state)
+	if dominated_by_one_champ:
+		var inactive_champ_actions := valid_actions.filter(func(a: Dictionary) -> bool:
+			var champ_id: String = a.get("champion", "")
+			return _champion_action_count.get(champ_id, 0) == 0
+		)
+		if not inactive_champ_actions.is_empty():
+			print("AI: Prioritizing inactive champion actions (%d available)" % inactive_champ_actions.size())
+			valid_actions = inactive_champ_actions
 
 	# Score actions
 	var scored_actions: Array = []
@@ -291,12 +326,39 @@ func _score_action(action: Dictionary, state: GameState) -> float:
 		"cast":
 			score = _score_cast(action, state)
 
+	# Strong fairness bonus for champions that haven't acted
+	# This ensures both champions participate in each turn
+	var champ_id: String = action.get("champion", "")
+	var action_count: int = _champion_action_count.get(champ_id, 0)
+
+	# Check if the OTHER champion has already acted
+	var other_champ_acted := false
+	var other_champ_action_count := 0
+	for other_id: String in _champion_action_count:
+		if other_id != champ_id:
+			other_champ_action_count = _champion_action_count[other_id]
+			if other_champ_action_count > 0:
+				other_champ_acted = true
+				break
+
+	if action_count == 0:
+		# Strong bonus for champions that haven't acted at all
+		score += 8.0
+		# Extra bonus if the other champion already acted - balance the turn
+		if other_champ_acted:
+			score += 5.0
+	elif action_count == 1:
+		score += 3.0  # Smaller bonus for only one action
+	elif action_count >= 3:
+		# Penalty for using same champion too much
+		score -= 2.0
+
 	return score
 
 
 func _score_move(action: Dictionary, state: GameState) -> float:
 	"""Score a move action."""
-	var score := 1.0
+	var score := 2.0  # Base move value
 	var champion := state.get_champion(action.get("champion", ""))
 	var target_pos: Vector2i = action.get("target", Vector2i.ZERO)
 
@@ -307,26 +369,76 @@ func _score_move(action: Dictionary, state: GameState) -> float:
 	var pathfinder := Pathfinder.new(state)
 	var range_calc := RangeCalculator.new()
 
-	# Prefer moving toward enemies
-	var min_enemy_dist := 999
-	for enemy: ChampionState in state.get_living_champions(opp_id):
-		var dist := pathfinder.manhattan_distance(target_pos, enemy.position)
-		min_enemy_dist = mini(min_enemy_dist, dist)
-
-		# Bonus for getting in attack range
-		if dist <= champion.current_range:
-			score += 3.0
-
-	# Closer to enemies is better (for melee)
-	if champion.current_range <= 1:
-		score += (10.0 - min_enemy_dist) * 0.3
-
-	# Avoid moving if we can already attack
+	# Check current attack capability
 	var current_targets := range_calc.get_valid_targets(champion, state)
-	if not current_targets.is_empty():
-		score *= 0.5
+	var can_currently_attack := not current_targets.is_empty()
 
-	return score
+	# Calculate distances to enemies from current and target positions
+	var current_min_dist := 999
+	var target_min_dist := 999
+	var will_be_in_range := false
+
+	for enemy: ChampionState in state.get_living_champions(opp_id):
+		var current_dist := _chebyshev_distance(champion.position, enemy.position)
+		var target_dist := _chebyshev_distance(target_pos, enemy.position)
+		current_min_dist = mini(current_min_dist, current_dist)
+		target_min_dist = mini(target_min_dist, target_dist)
+
+		# Check if we'll be in attack range after moving
+		if target_dist <= champion.current_range:
+			will_be_in_range = true
+
+	# Big bonus for moving into attack range when we can't currently attack
+	if not can_currently_attack and will_be_in_range:
+		score += 8.0  # High priority to get into the fight!
+
+	# Bonus for getting closer to enemies
+	if target_min_dist < current_min_dist:
+		score += (current_min_dist - target_min_dist) * 1.5
+
+	# Bonus for melee champions getting adjacent
+	if champion.current_range <= 1 and target_min_dist <= 1:
+		score += 4.0
+
+	# Small penalty for moving when already in attack range (but don't completely discourage it)
+	if can_currently_attack:
+		score -= 2.0
+
+	# Bonus for moving if we've already attacked (repositioning)
+	if champion.has_attacked:
+		score += 1.0
+
+	return maxf(score, 0.5)  # Minimum score to keep moves as options
+
+
+func _chebyshev_distance(from: Vector2i, to: Vector2i) -> int:
+	"""Calculate Chebyshev distance (8-directional king moves)."""
+	return maxi(absi(to.x - from.x), absi(to.y - from.y))
+
+
+func _check_champion_imbalance(state: GameState) -> bool:
+	"""Check if one champion has been doing all the work while the other is idle."""
+	var living_champs := state.get_living_champions(player_id)
+	if living_champs.size() < 2:
+		return false  # Only one champion, no imbalance possible
+
+	# Check action counts
+	var max_actions := 0
+	var min_actions := 999
+	var idle_count := 0
+
+	for champ: ChampionState in living_champs:
+		var count: int = _champion_action_count.get(champ.unique_id, 0)
+		max_actions = maxi(max_actions, count)
+		min_actions = mini(min_actions, count)
+		if count == 0:
+			idle_count += 1
+
+	# Imbalance if one champion has done 2+ actions and another has done none
+	if max_actions >= 2 and idle_count > 0:
+		return true
+
+	return false
 
 
 func _score_attack(action: Dictionary, state: GameState) -> float:
@@ -541,3 +653,118 @@ func _delay(seconds: float) -> void:
 	var tree := Engine.get_main_loop() as SceneTree
 	if tree:
 		await tree.create_timer(seconds).timeout
+
+
+func _manage_response_slot() -> void:
+	"""Evaluate and place the best response card in the response slot."""
+	var state := game_controller.get_game_state()
+	var hand := state.get_hand(player_id)
+	var current_slot := state.get_response_slot(player_id)
+
+	# Find all response cards in hand
+	var response_cards: Array[Dictionary] = []
+	for card_name: String in hand:
+		var card_data := CardDatabase.get_card(card_name)
+		if card_data.get("type", "") == "Response":
+			response_cards.append({
+				"name": card_name,
+				"data": card_data,
+				"score": _score_response_card_for_slot(card_name, card_data, state)
+			})
+
+	if response_cards.is_empty():
+		# No response cards available - clear slot if we have one
+		# (Keep existing card in slot since it's better than nothing)
+		return
+
+	# Sort by score
+	response_cards.sort_custom(func(a, b): return a["score"] > b["score"])
+
+	var best_card: Dictionary = response_cards[0]
+
+	# If we already have a card in slot, only replace if new one is better
+	if not current_slot.is_empty():
+		var current_score := _score_response_card_for_slot(current_slot, CardDatabase.get_card(current_slot), state)
+		if best_card["score"] <= current_score:
+			# Keep current card
+			return
+
+	# Place the best response card in the slot
+	var card_to_place: String = best_card["name"]
+	if state.set_response_slot(player_id, card_to_place):
+		print("AI: Placed '%s' in response slot (score: %.1f)" % [card_to_place, best_card["score"]])
+
+
+func _score_response_card_for_slot(card_name: String, card_data: Dictionary, state: GameState) -> float:
+	"""Score a response card for slot placement."""
+	var score := 0.0
+	var trigger: String = card_data.get("trigger", "")
+	var cost: int = card_data.get("cost", 0)
+	var effects: Array = card_data.get("effect", [])
+
+	# Base score by trigger type
+	match trigger:
+		"beforeDamage":
+			# Defensive cards are valuable
+			score += 5.0
+		"afterDamage":
+			# Reactive damage/effects
+			score += 4.0
+		"onMove":
+			# Traps and movement reactions
+			score += 3.0
+		"onHeal":
+			# Usually disruption
+			score += 3.0
+		"onCast":
+			# Spell reactions
+			score += 3.0
+		_:
+			score += 2.0
+
+	# Evaluate effects
+	for effect: Dictionary in effects:
+		var effect_type: String = effect.get("type", "")
+		match effect_type:
+			"damage":
+				var value = effect.get("value", 0)
+				if value is int:
+					score += value * 1.5
+			"heal":
+				var value = effect.get("value", 0)
+				if value is int:
+					score += value * 1.0
+			"move":
+				# Movement effects (dodge, etc.) are valuable
+				score += 3.0
+			"buff":
+				var buff_name: String = effect.get("name", "")
+				if buff_name == "negateDamage":
+					score += 8.0  # Damage negation is very valuable
+				elif buff_name == "shield":
+					score += 6.0
+				else:
+					score += 2.0
+			"statMod":
+				score += 2.0
+
+	# Penalize high-cost cards (harder to trigger)
+	if cost > 3:
+		score -= (cost - 3) * 1.0
+
+	# Bonus for character-specific cards if that character is alive and healthy
+	var card_character: String = card_data.get("character", "")
+	if not card_character.is_empty():
+		for champ: ChampionState in state.get_champions(player_id):
+			if champ.champion_name == card_character:
+				if champ.is_alive():
+					# Bonus if the character is low health (needs protection)
+					var hp_ratio := float(champ.current_hp) / float(champ.max_hp)
+					if hp_ratio < 0.5:
+						score += 3.0
+				else:
+					# Character is dead - card is useless
+					score = -10.0
+				break
+
+	return score

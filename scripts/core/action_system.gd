@@ -119,8 +119,17 @@ class AttackAction extends Action:
 			return false
 		if attacker.owner_id != state.active_player:
 			return false
-		if attacker.owner_id == target.owner_id:
-			return false  # Can't attack allies
+
+		# Special case: attackHeals buff allows "attacking" allies to heal them
+		if attacker.has_buff("attackHeals"):
+			# Can target allies for healing
+			if attacker.owner_id != target.owner_id:
+				return false  # With attackHeals, can ONLY target allies
+		else:
+			# Normal attack - can't attack allies
+			if attacker.owner_id == target.owner_id:
+				return false
+
 		if not attacker.can_attack():
 			return false
 		if not target.is_alive():
@@ -140,12 +149,38 @@ class AttackAction extends Action:
 		# Store undo data
 		undo_data = {
 			"target_hp": target.current_hp,
+			"attacker_hp": attacker.current_hp,
 			"has_attacked": attacker.has_attacked,
 			"had_extra_attack": attacker.has_buff("extraAttack")
 		}
 
-		# Deal damage
-		damage_dealt = target.take_damage(attacker.current_power)
+		# Calculate base damage/heal amount
+		var amount: int = attacker.current_power
+
+		# Check for attackHeals buff - heal ally instead of damage
+		if attacker.has_buff("attackHeals"):
+			# This is a heal action, not damage
+			damage_dealt = target.heal(amount)
+			print("%s heals %s for %d (attackHeals)" % [attacker.champion_name, target.champion_name, damage_dealt])
+		else:
+			# Normal damage attack
+			var damage: int = amount
+
+			# Critical hit (50% chance for double damage) - Bloodletter equipment
+			if attacker.has_buff("critical"):
+				if randi() % 2 == 0:
+					damage *= 2
+					print("Critical hit! Damage doubled to %d" % damage)
+
+			# Check for redirectDamage (Self-Hate) - damage goes to attacker instead
+			if target.has_buff("redirectDamage"):
+				target.remove_buff("redirectDamage")
+				damage_dealt = attacker.take_damage(damage)
+				print("Damage redirected to attacker! %s takes %d damage" % [attacker.champion_name, damage_dealt])
+				# Skip normal damage to target
+			else:
+				# Deal damage to target normally
+				damage_dealt = target.take_damage(damage)
 
 		# Check for extra attack buff
 		if not attacker.has_attacked:
@@ -161,9 +196,38 @@ class AttackAction extends Action:
 
 		executed = true
 
-		# Check for leech
-		if attacker.has_buff("leech"):
-			attacker.heal(damage_dealt)
+		# Post-damage effects (only if damage was dealt to target, not redirected, and not a heal)
+		if damage_dealt > 0 and not target.has_buff("redirectDamage") and not attacker.has_buff("attackHeals"):
+			# Check for leech
+			if attacker.has_buff("leech"):
+				attacker.heal(damage_dealt)
+
+			# Return damage (Intimidation) - reflect damage back to attacker
+			if target.has_buff("returnDamage"):
+				var reflected: int = attacker.take_damage(damage_dealt)
+				print("Return damage! %s takes %d reflected damage" % [attacker.champion_name, reflected])
+
+			# Elk Restoration - heal all friendlies when dealing combat damage
+			if attacker.has_buff("elkRestoration"):
+				for ally: ChampionState in state.get_champions(attacker.owner_id):
+					if ally.is_alive():
+						ally.heal(2)
+				print("Elk Restoration healed all friendlies for 2")
+
+			# Ape Smash - splash 1 damage to other enemies in range
+			if attacker.has_buff("apeSmash"):
+				var opp_id := 2 if attacker.owner_id == 1 else 1
+				var range_calc := RangeCalculator.new()
+				for enemy: ChampionState in state.get_champions(opp_id):
+					if enemy.is_alive() and enemy.unique_id != target_id:
+						if range_calc.can_attack(attacker, enemy, state):
+							enemy.take_damage(1)
+							print("Ape Smash splashes 1 damage to %s" % enemy.champion_name)
+
+			# Draw on damage (Cheetah Form)
+			if attacker.has_buff("drawOnDamage"):
+				state.draw_card(attacker.owner_id)
+				print("Draw on damage triggered - drew a card")
 
 		return true
 
@@ -221,11 +285,54 @@ class CastCardAction extends Action:
 		# Check mana
 		var card_data := CardDatabase.get_card(card_name)
 		var cost: int = card_data.get("cost", 0)
+
+		# Check for freeRangerCard buff - Ranger cards cost 0
+		var card_character: String = card_data.get("character", "")
+		if card_character == "Ranger" and caster.has_buff("freeRangerCard"):
+			cost = 0  # Free Ranger card
+
 		if state.get_mana(caster.owner_id) < cost:
+			return false
+
+		# Check for action restriction conflicts
+		# If a card applies "canAttack: false" to self, caster must not have attacked yet
+		if _card_prevents_attack_on_self(card_data) and caster.has_attacked:
+			return false
+
+		# If a card applies "canMove: false" to self, caster must not have moved yet
+		if _card_prevents_move_on_self(card_data) and caster.has_moved:
 			return false
 
 		# Validate targets based on card requirements
 		return _validate_targets(state, card_data)
+
+	func _card_prevents_attack_on_self(card_data: Dictionary) -> bool:
+		"""Check if a card applies canAttack: false debuff to self."""
+		var effects: Array = card_data.get("effect", [])
+		for effect: Dictionary in effects:
+			var effect_type: String = effect.get("type", "")
+			if effect_type == "debuff":
+				var debuff_name: String = effect.get("name", "")
+				var debuff_target: String = effect.get("target", "")
+				var debuff_value = effect.get("value", true)
+				# Check for canAttack debuff on self
+				if debuff_name == "canAttack" and debuff_target == "self" and debuff_value == false:
+					return true
+		return false
+
+	func _card_prevents_move_on_self(card_data: Dictionary) -> bool:
+		"""Check if a card applies canMove: false debuff to self."""
+		var effects: Array = card_data.get("effect", [])
+		for effect: Dictionary in effects:
+			var effect_type: String = effect.get("type", "")
+			if effect_type == "debuff":
+				var debuff_name: String = effect.get("name", "")
+				var debuff_target: String = effect.get("target", "")
+				var debuff_value = effect.get("value", true)
+				# Check for canMove debuff on self
+				if debuff_name == "canMove" and debuff_target == "self" and debuff_value == false:
+					return true
+		return false
 
 	func _validate_targets(state: GameState, card_data: Dictionary) -> bool:
 		var target_type: String = str(card_data.get("target", "none"))
@@ -317,14 +424,27 @@ class CastCardAction extends Action:
 		var card_data := CardDatabase.get_card(card_name)
 		var cost: int = card_data.get("cost", 0)
 
+		# Check for freeRangerCard buff
+		var card_character: String = card_data.get("character", "")
+		var free_ranger := false
+		if card_character == "Ranger" and caster.has_buff("freeRangerCard"):
+			cost = 0
+			free_ranger = true
+
 		# Store undo data
 		undo_data = {
 			"mana": state.get_mana(caster.owner_id),
-			"hand": state.get_hand(caster.owner_id).duplicate()
+			"hand": state.get_hand(caster.owner_id).duplicate(),
+			"had_free_ranger": free_ranger
 		}
 
 		# Spend mana
 		state.spend_mana(caster.owner_id, cost)
+
+		# Consume freeRangerCard buff if used
+		if free_ranger:
+			caster.remove_buff("freeRangerCard")
+			print("Free Ranger card used: %s" % card_name)
 
 		# Remove card from hand
 		state.play_card(caster.owner_id, card_name)

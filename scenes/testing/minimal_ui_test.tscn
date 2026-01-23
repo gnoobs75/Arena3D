@@ -1,0 +1,129 @@
+[gd_scene load_steps=2 format=3 uid="uid://ctest_minimal_ui"]
+
+[ext_resource type="Script" path="res://scenes/testing/minimal_ui_test.gd" id="1_script"]
+
+[node name="MinimalUITest" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_script")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.1, 0.1, 0.15, 1)
+
+[node name="VBoxContainer" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 40.0
+offset_top = 40.0
+offset_right = -40.0
+offset_bottom = -40.0
+
+[node name="Title" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 32
+text = "Arena AI vs AI Tester"
+horizontal_alignment = 1
+
+[node name="HSeparator" type="HSeparator" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="ConfigSection" type="HBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="MatchesLabel" type="Label" parent="VBoxContainer/ConfigSection"]
+layout_mode = 2
+text = "Matches:"
+
+[node name="MatchesSpinBox" type="SpinBox" parent="VBoxContainer/ConfigSection"]
+layout_mode = 2
+min_value = 1.0
+max_value = 1000.0
+value = 20.0
+
+[node name="SeedLabel" type="Label" parent="VBoxContainer/ConfigSection"]
+layout_mode = 2
+text = "  Seed (0=random):"
+
+[node name="SeedSpinBox" type="SpinBox" parent="VBoxContainer/ConfigSection"]
+layout_mode = 2
+max_value = 999999999.0
+
+[node name="HSeparator2" type="HSeparator" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="ProgressSection" type="VBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="ProgressLabel" type="Label" parent="VBoxContainer/ProgressSection"]
+layout_mode = 2
+text = "0 / 0"
+horizontal_alignment = 1
+
+[node name="ProgressBar" type="ProgressBar" parent="VBoxContainer/ProgressSection"]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+
+[node name="StatusSection" type="VBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="StatusLabel" type="Label" parent="VBoxContainer/StatusSection"]
+layout_mode = 2
+text = "Ready"
+horizontal_alignment = 1
+
+[node name="HSeparator3" type="HSeparator" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="StatsSection" type="VBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="StatsLabel" type="RichTextLabel" parent="VBoxContainer/StatsSection"]
+layout_mode = 2
+size_flags_vertical = 3
+bbcode_enabled = true
+text = "[b]Statistics will appear here[/b]"
+
+[node name="HSeparator4" type="HSeparator" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="ControlsSection" type="HBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+alignment = 1
+
+[node name="StartButton" type="Button" parent="VBoxContainer/ControlsSection"]
+custom_minimum_size = Vector2(120, 40)
+layout_mode = 2
+text = "Start"
+
+[node name="PauseButton" type="Button" parent="VBoxContainer/ControlsSection"]
+custom_minimum_size = Vector2(120, 40)
+layout_mode = 2
+text = "Pause"
+
+[node name="ExportButton" type="Button" parent="VBoxContainer/ControlsSection"]
+custom_minimum_size = Vector2(120, 40)
+layout_mode = 2
+text = "Export"
+
+[node name="SpeedLabel" type="Label" parent="VBoxContainer/ControlsSection"]
+layout_mode = 2
+text = "  Speed: 1.0x"
+
+[node name="SpeedSlider" type="HSlider" parent="VBoxContainer/ControlsSection"]
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+min_value = 0.1
+max_value = 10.0
+step = 0.1
+value = 1.0

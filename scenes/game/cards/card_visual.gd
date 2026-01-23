@@ -20,6 +20,7 @@ var card_data: Dictionary = {}
 var is_playable: bool = true
 var is_hovered: bool = false
 var is_face_down: bool = false
+var is_selected: bool = false  # For multi-select mode
 var original_position: Vector2 = Vector2.ZERO
 var character_texture: Texture2D = null
 
@@ -103,6 +104,12 @@ func set_face_down(face_down: bool) -> void:
 	queue_redraw()
 
 
+func set_selected(selected: bool) -> void:
+	"""Set selection state for multi-select mode."""
+	is_selected = selected
+	queue_redraw()
+
+
 func _draw() -> void:
 	if is_face_down:
 		_draw_card_back()
@@ -114,17 +121,25 @@ func _draw_card_back() -> void:
 	"""Draw the universal Arena card back design."""
 	var w := size.x
 	var h := size.y
+	var font := ThemeDB.fallback_font
+
+	# === DROP SHADOW ===
+	var shadow_offset := VisualTheme.SHADOW_OFFSET_MEDIUM
+	draw_rect(Rect2(shadow_offset.x, shadow_offset.y, w, h), VisualTheme.SHADOW_COLOR)
 
 	# Outer border
-	draw_rect(Rect2(0, 0, w, h), VisualTheme.CARD_BACK["border"], false, 3.0)
+	draw_rect(Rect2(0, 0, w, h), VisualTheme.CARD_BACK["border"])
 
 	# Background gradient
 	var bg_rect := Rect2(2, 2, w - 4, h - 4)
-	draw_rect(bg_rect, VisualTheme.CARD_BACK["primary"])
+	var bg_top := VisualTheme.CARD_BACK["secondary"]
+	var bg_bottom := VisualTheme.CARD_BACK["primary"]
+	VisualTheme.draw_vertical_gradient(self, bg_rect, bg_top, bg_bottom)
 
-	# Inner decorative border
+	# Inner decorative border with bevel
 	var inner_rect := Rect2(8, 8, w - 16, h - 16)
-	draw_rect(inner_rect, VisualTheme.CARD_BACK["secondary"], false, 2.0)
+	draw_rect(inner_rect, VisualTheme.CARD_BACK["secondary"].lerp(Color.BLACK, 0.3), false, 2.0)
+	VisualTheme.draw_bevel(self, inner_rect, 1.0, Color(1, 1, 1, 0.15), Color(0, 0, 0, 0.2))
 
 	# Diamond pattern in center
 	var center := Vector2(w / 2, h / 2)
@@ -135,8 +150,20 @@ func _draw_card_back() -> void:
 		center + Vector2(0, diamond_size),
 		center + Vector2(-diamond_size, 0)
 	])
+
+	# Diamond shadow
+	var shadow_diamond := PackedVector2Array()
+	for p in diamond_points:
+		shadow_diamond.append(p + Vector2(2, 2))
+	draw_colored_polygon(shadow_diamond, Color(0, 0, 0, 0.3))
+
+	# Main diamond with gradient effect
 	draw_colored_polygon(diamond_points, VisualTheme.CARD_BACK["accent"])
 	draw_polyline(diamond_points + PackedVector2Array([diamond_points[0]]), VisualTheme.CARD_BACK["border"], 2.0)
+
+	# Diamond highlight (top edge)
+	draw_line(diamond_points[3], diamond_points[0], Color(1, 1, 1, 0.3), 1.5)
+	draw_line(diamond_points[0], diamond_points[1], Color(1, 1, 1, 0.2), 1.5)
 
 	# Inner diamond
 	diamond_size = 18.0
@@ -147,18 +174,19 @@ func _draw_card_back() -> void:
 		center + Vector2(-diamond_size, 0)
 	])
 	draw_colored_polygon(diamond_points, VisualTheme.CARD_BACK["secondary"])
+	# Inner diamond highlight
+	draw_line(diamond_points[3], diamond_points[0], Color(1, 1, 1, 0.2), 1.0)
 
-	# "ARENA" text
-	var font := ThemeDB.fallback_font
+	# "ARENA" text with shadow
 	var text := "ARENA"
-	var text_size := font.get_string_size(text, HORIZONTAL_ALIGNMENT_CENTER, -1, 10)
-	draw_string(font, Vector2((w - text_size.x) / 2, h - 20), text, HORIZONTAL_ALIGNMENT_CENTER, -1, 10, VisualTheme.CARD_BACK["accent"])
+	var text_pos := Vector2(w / 2 - 18, h - 18)
+	VisualTheme.draw_text_shadow(self, font, text_pos, text, 11, VisualTheme.CARD_BACK["accent"])
 
 	# Corner decorations
-	_draw_corner_flourish(Vector2(12, 12), 1)
-	_draw_corner_flourish(Vector2(w - 12, 12), 2)
-	_draw_corner_flourish(Vector2(12, h - 12), 3)
-	_draw_corner_flourish(Vector2(w - 12, h - 12), 4)
+	_draw_corner_flourish(Vector2(14, 14), 1)
+	_draw_corner_flourish(Vector2(w - 14, 14), 2)
+	_draw_corner_flourish(Vector2(14, h - 14), 3)
+	_draw_corner_flourish(Vector2(w - 14, h - 14), 4)
 
 
 func _draw_corner_flourish(pos: Vector2, corner: int) -> void:
@@ -199,6 +227,11 @@ func _draw_card_front() -> void:
 	if not is_playable:
 		border_color = border_color.lerp(Color(0.2, 0.2, 0.2), 0.65)
 
+	# === LAYER 1: DROP SHADOW ===
+	var shadow_offset := VisualTheme.SHADOW_OFFSET_MEDIUM
+	var shadow_color := VisualTheme.SHADOW_HARD if is_playable else VisualTheme.SHADOW_SOFT
+	draw_rect(Rect2(shadow_offset.x, shadow_offset.y, w, h), shadow_color)
+
 	# === CARD BORDER ===
 	draw_rect(Rect2(0, 0, w, h), border_color)
 
@@ -221,84 +254,124 @@ func _draw_card_front() -> void:
 		# Apply dim effect if not playable
 		var modulate_color := Color.WHITE if is_playable else Color(0.4, 0.4, 0.4)
 		draw_texture_rect(character_texture, Rect2(draw_pos, scaled_size), false, modulate_color)
+
+		# === VIGNETTE GRADIENT (darken bottom for text readability) ===
+		var vignette_rect := Rect2(art_rect.position.x, art_rect.position.y + art_rect.size.y * 0.5, art_rect.size.x, art_rect.size.y * 0.5)
+		VisualTheme.draw_vertical_gradient(self, vignette_rect, Color(0, 0, 0, 0), Color(0, 0, 0, 0.5))
 	else:
-		# Fallback: solid color background
+		# Fallback: gradient color background
 		var champ_colors := VisualTheme.get_champion_colors(champion)
-		var bg_color: Color = champ_colors["primary"].lerp(Color(0.1, 0.1, 0.1), 0.5)
+		var bg_top: Color = champ_colors["secondary"].lerp(Color(0.1, 0.1, 0.1), 0.4)
+		var bg_bottom: Color = champ_colors["primary"].lerp(Color(0.1, 0.1, 0.1), 0.6)
 		if not is_playable:
-			bg_color = bg_color.lerp(Color(0.2, 0.2, 0.2), 0.6)
-		draw_rect(art_rect, bg_color)
+			bg_top = bg_top.lerp(Color(0.2, 0.2, 0.2), 0.6)
+			bg_bottom = bg_bottom.lerp(Color(0.2, 0.2, 0.2), 0.6)
+		VisualTheme.draw_vertical_gradient(self, art_rect, bg_top, bg_bottom)
 
 	# === COST OVERLAY (Top Right) ===
-	var cost_size := 28.0
+	var cost_size := 30.0  # Slightly larger
 	var cost_margin := 6.0
-	var cost_rect := Rect2(w - cost_size - cost_margin, cost_margin, cost_size, cost_size)
+	var cost_center := Vector2(w - cost_size / 2 - cost_margin, cost_margin + cost_size / 2)
 
-	# Background circle
-	var cost_center := cost_rect.position + Vector2(cost_size / 2, cost_size / 2)
-	var cost_bg_color := OVERLAY_BG if is_playable else Color(0.15, 0.15, 0.18, 0.9)
-	draw_circle(cost_center, cost_size / 2, cost_bg_color)
+	# Cost shadow
+	draw_circle(cost_center + VisualTheme.SHADOW_OFFSET_SMALL, cost_size / 2, VisualTheme.SHADOW_COLOR)
+
+	# Cost circle with gradient effect (draw concentric circles)
+	var cost_bg_outer := OVERLAY_BG.lerp(Color.BLACK, 0.1) if is_playable else Color(0.12, 0.12, 0.15, 0.9)
+	var cost_bg_inner := OVERLAY_BG.lerp(Color.WHITE, 0.05) if is_playable else Color(0.18, 0.18, 0.2, 0.9)
+	draw_circle(cost_center, cost_size / 2, cost_bg_outer)
+	draw_circle(cost_center, cost_size / 2 - 3, cost_bg_inner)
+
+	# Cost border with highlight
 	draw_arc(cost_center, cost_size / 2, 0, TAU, 32, OVERLAY_BORDER, 2.0)
+	draw_arc(cost_center, cost_size / 2 - 1, PI * 1.25, PI * 1.75, 16, VisualTheme.BEVEL_HIGHLIGHT, 1.0)  # Top highlight
 
-	# Cost number
+	# Cost number with shadow
 	var cost_str := str(cost)
-	var cost_text_size := font.get_string_size(cost_str, HORIZONTAL_ALIGNMENT_CENTER, -1, 16)
-	var cost_text_pos := cost_center + Vector2(-cost_text_size.x / 2, 6)
+	var cost_text_pos := cost_center + Vector2(-4, 6)
 	var cost_color := Color(1.0, 0.9, 0.5) if is_playable else Color(0.5, 0.5, 0.5)
-	draw_string(font, cost_text_pos, cost_str, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cost_color)
+	VisualTheme.draw_text_shadow(self, font, cost_text_pos, cost_str, VisualTheme.FONT_CARD_COST, cost_color)
 
 	# === NAME OVERLAY (Top Middle) ===
-	var name_margin := 4.0
-	var name_height := 22.0
+	var name_margin := VisualTheme.PADDING_CARD
+	var name_height := 24.0
 	var name_width := w - cost_size - cost_margin * 2 - name_margin * 2
 	var name_rect := Rect2(name_margin, name_margin, name_width, name_height)
 
-	# Background
-	draw_rect(name_rect, OVERLAY_BG)
-	draw_rect(name_rect, OVERLAY_BORDER, false, 1.0)
+	# Name shadow
+	draw_rect(Rect2(name_rect.position + VisualTheme.SHADOW_OFFSET_SMALL, name_rect.size), VisualTheme.SHADOW_SOFT)
 
-	# Card name text
+	# Name background gradient
+	var name_bg_top := OVERLAY_BG.lerp(Color.WHITE, 0.08)
+	var name_bg_bottom := OVERLAY_BG
+	VisualTheme.draw_vertical_gradient(self, name_rect, name_bg_top, name_bg_bottom)
+
+	# Name border with bevel
+	draw_rect(name_rect, OVERLAY_BORDER, false, 1.0)
+	VisualTheme.draw_bevel(self, name_rect)
+
+	# Card name text with shadow
 	var card_name_text: String = card_data.get("name", "Unknown")
-	if card_name_text.length() > 16:
-		card_name_text = card_name_text.substr(0, 15) + ".."
+	if card_name_text.length() > 14:
+		card_name_text = card_name_text.substr(0, 13) + ".."
 	var name_color := Color.WHITE if is_playable else Color(0.6, 0.6, 0.6)
-	var name_text_pos := Vector2(name_margin + 4, name_margin + 16)
-	draw_string(font, name_text_pos, card_name_text, HORIZONTAL_ALIGNMENT_LEFT, int(name_width) - 8, 12, name_color)
+	var name_text_pos := Vector2(name_margin + 5, name_margin + 17)
+	VisualTheme.draw_text_shadow(self, font, name_text_pos, card_name_text, VisualTheme.FONT_CARD_NAME, name_color)
 
 	# === TYPE INDICATOR (small badge next to name) ===
 	var type_short := card_type.substr(0, 1)  # A, R, or E
-	var type_badge_pos := Vector2(name_rect.end.x - 16, name_margin + 15)
+	var type_badge_pos := Vector2(name_rect.end.x - 14, name_margin + 17)
 	var type_color: Color
 	match card_type:
 		"Action":
-			type_color = Color(0.3, 0.6, 0.9) if is_playable else Color(0.3, 0.3, 0.4)
+			type_color = Color(0.4, 0.7, 1.0) if is_playable else Color(0.3, 0.3, 0.4)
 		"Response":
-			type_color = Color(0.9, 0.6, 0.3) if is_playable else Color(0.4, 0.3, 0.3)
+			type_color = Color(1.0, 0.7, 0.3) if is_playable else Color(0.4, 0.3, 0.3)
 		"Equipment":
-			type_color = Color(0.6, 0.9, 0.3) if is_playable else Color(0.3, 0.4, 0.3)
+			type_color = Color(0.5, 1.0, 0.4) if is_playable else Color(0.3, 0.4, 0.3)
 		_:
 			type_color = Color(0.6, 0.6, 0.6)
-	draw_string(font, type_badge_pos, type_short, HORIZONTAL_ALIGNMENT_CENTER, -1, 10, type_color)
+	VisualTheme.draw_text_shadow(self, font, type_badge_pos, type_short, VisualTheme.FONT_CARD_TYPE, type_color)
 
 	# === DESCRIPTION OVERLAY (Bottom) ===
-	var desc_margin := 4.0
-	var desc_height := 70.0
+	var desc_margin := VisualTheme.PADDING_CARD
+	var desc_height := 72.0
 	var desc_rect := Rect2(desc_margin, h - desc_height - desc_margin, w - desc_margin * 2, desc_height)
 
-	# Background
-	draw_rect(desc_rect, OVERLAY_BG)
+	# Description shadow
+	draw_rect(Rect2(desc_rect.position + VisualTheme.SHADOW_OFFSET_SMALL, desc_rect.size), VisualTheme.SHADOW_SOFT)
+
+	# Description background gradient (inverted - darker at bottom)
+	var desc_bg_top := OVERLAY_BG
+	var desc_bg_bottom := OVERLAY_BG.lerp(Color.BLACK, 0.15)
+	VisualTheme.draw_vertical_gradient(self, desc_rect, desc_bg_top, desc_bg_bottom)
+
+	# Description border with inset effect
 	draw_rect(desc_rect, OVERLAY_BORDER, false, 1.0)
+	VisualTheme.draw_inset(self, desc_rect)
 
 	# Description text (wrapped)
 	var desc: String = card_data.get("description", "")
-	var desc_text_rect := Rect2(desc_rect.position.x + 4, desc_rect.position.y + 2, desc_rect.size.x - 8, desc_rect.size.y - 4)
-	_draw_wrapped_text(desc, desc_text_rect, 9)
+	var desc_text_rect := Rect2(desc_rect.position.x + 5, desc_rect.position.y + 3, desc_rect.size.x - 10, desc_rect.size.y - 6)
+	_draw_wrapped_text(desc, desc_text_rect, VisualTheme.FONT_CARD_DESC)
 
-	# === PLAYABILITY INDICATOR ===
-	if is_playable and is_hovered:
-		# Glow effect when playable and hovered
-		draw_rect(Rect2(0, 0, w, h), Color(1, 1, 0.7, 0.2))
-		draw_rect(Rect2(0, 0, w, h), Color(1, 1, 0.5, 0.8), false, 2.0)
+	# === SELECTION INDICATOR (for multi-select mode) ===
+	if is_selected:
+		# Strong green glow for selected cards
+		draw_rect(Rect2(0, 0, w, h), Color(0.2, 0.8, 0.3, 0.3))
+		draw_rect(Rect2(0, 0, w, h), Color(0.3, 1.0, 0.4, 1.0), false, 3.0)
+		# Checkmark indicator with shadow
+		var check_pos := Vector2(w - 20, h - 25)
+		VisualTheme.draw_text_shadow(self, font, check_pos, "✓", 18, Color(0.3, 1.0, 0.4))
+
+	# === PLAYABILITY / HOVER INDICATOR ===
+	if is_playable and is_hovered and not is_selected:
+		# Outer glow effect when playable and hovered
+		for i in range(3, 0, -1):
+			var glow_alpha := 0.15 * (1.0 - float(i) / 3.0)
+			draw_rect(Rect2(-i, -i, w + i * 2, h + i * 2), Color(1.0, 0.95, 0.6, glow_alpha), false, 2.0)
+		draw_rect(Rect2(0, 0, w, h), Color(1, 1, 0.7, 0.15))
+		draw_rect(Rect2(0, 0, w, h), Color(1, 1, 0.5, 0.9), false, 2.0)
 
 
 func _draw_wrapped_text(text: String, rect: Rect2, font_size: int) -> void:
@@ -365,5 +438,6 @@ func _on_mouse_exited() -> void:
 func _on_gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		if event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-			if is_playable:
+			# Allow clicks when playable OR when selected (for deselecting)
+			if is_playable or is_selected:
 				card_clicked.emit(card_name)

@@ -90,9 +90,21 @@ func end_turn() -> void:
 func _execute_end_phase() -> void:
 	"""Handle END phase logic."""
 	var player_id := game_state.active_player
+	var opp_id := 2 if player_id == 1 else 1
 
 	# Discard down to hand limit (7)
 	_enforce_hand_limit(player_id)
+
+	# Process stealMana buffs (Pick Pocket) - opponent's champions steal from current player
+	for champion: ChampionState in game_state.get_champions(opp_id):
+		if champion.is_alive() and champion.has_buff("stealMana"):
+			var steal_amount := champion.get_buff_stacks("stealMana")
+			var current_mana := game_state.get_mana(player_id)
+			var stolen := mini(steal_amount, current_mana)
+			if stolen > 0:
+				game_state.spend_mana(player_id, stolen)
+				game_state.add_mana(opp_id, stolen)
+				print("End of turn: %s (player %d) stole %d mana from player %d" % [champion.champion_name, opp_id, stolen, player_id])
 
 	# Tick effects on current player's champions to decrement durations
 	# This ensures "nextTurn" debuffs on enemies last through their full turn

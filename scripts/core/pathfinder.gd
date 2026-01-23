@@ -87,6 +87,11 @@ func get_reachable_tiles(champion: ChampionState) -> Array[Vector2i]:
 	var reachable: Array[Vector2i] = []
 	var start: Vector2i = champion.position
 	var max_distance: int = champion.movement_remaining
+
+	# Check for unlimited movement buff (Quick Advantage, Super Charged)
+	if champion.has_buff("unlimitedMovement"):
+		max_distance = 100  # Effectively unlimited within board
+
 	var directions: Array[Vector2i] = _get_move_directions(champion)
 
 	# BFS with distance tracking

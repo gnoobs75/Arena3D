@@ -445,7 +445,7 @@ func get_board_size_pixels() -> Vector2:
 # === Inner Classes ===
 
 class TileDrawer extends Control:
-	"""Custom drawing for a single tile."""
+	"""Custom drawing for a single tile with gradients and depth."""
 	var tile_x: int = 0
 	var tile_y: int = 0
 	var terrain_type: int = 0  # GameState.Terrain enum value
@@ -457,50 +457,66 @@ class TileDrawer extends Control:
 		# Checkerboard pattern for empty tiles
 		var is_alt := (tile_x + tile_y) % 2 == 1
 
-		# Base tile color
-		var base_color: Color
 		var border_color := VisualTheme.TILE_BORDER
 
 		match terrain_type:
-			1:  # WALL
-				base_color = VisualTheme.TILE_WALL
-				# Draw brick pattern
-				draw_rect(Rect2(1, 1, w - 2, h - 2), base_color)
+			1:  # WALL - raised appearance
+				var wall_top := VisualTheme.TILE_WALL.lerp(Color.WHITE, 0.1)
+				var wall_bottom := VisualTheme.TILE_WALL.lerp(Color.BLACK, 0.15)
+				VisualTheme.draw_vertical_gradient(self, Rect2(1, 1, w - 2, h - 2), wall_top, wall_bottom)
 				_draw_brick_pattern()
-			2:  # PIT
-				base_color = VisualTheme.TILE_PIT
-				draw_rect(Rect2(1, 1, w - 2, h - 2), base_color)
-				# Draw pit edge glow
-				draw_rect(Rect2(4, 4, w - 8, h - 8), VisualTheme.TILE_PIT_EDGE, false, 2.0)
-			_:  # EMPTY
-				base_color = VisualTheme.TILE_EMPTY_ALT if is_alt else VisualTheme.TILE_EMPTY
-				draw_rect(Rect2(1, 1, w - 2, h - 2), base_color)
+				# Bevel for raised effect
+				VisualTheme.draw_bevel(self, Rect2(1, 1, w - 2, h - 2), 1.0, Color(1, 1, 1, 0.12), Color(0, 0, 0, 0.2))
+			2:  # PIT - sunken appearance
+				var pit_outer := VisualTheme.TILE_PIT
+				var pit_inner := VisualTheme.TILE_PIT.lerp(Color.BLACK, 0.3)
+				draw_rect(Rect2(1, 1, w - 2, h - 2), pit_outer)
+				# Radial-ish gradient (darker center)
+				draw_rect(Rect2(8, 8, w - 16, h - 16), pit_inner)
+				draw_rect(Rect2(14, 14, w - 28, h - 28), pit_inner.lerp(Color.BLACK, 0.3))
+				# Inset shadow for sunken effect
+				VisualTheme.draw_inset(self, Rect2(2, 2, w - 4, h - 4))
+				# Glowing edge
+				for i in range(3, 0, -1):
+					var glow_alpha := 0.25 * (1.0 - float(i) / 3.0)
+					draw_rect(Rect2(4 + i, 4 + i, w - 8 - i * 2, h - 8 - i * 2), Color(0.4, 0.2, 0.5, glow_alpha), false, 1.5)
+			_:  # EMPTY - subtle gradient
+				var base_color := VisualTheme.TILE_EMPTY_ALT if is_alt else VisualTheme.TILE_EMPTY
+				var top_color := base_color.lerp(Color.WHITE, 0.04)
+				var bottom_color := base_color.lerp(Color.BLACK, 0.04)
+				VisualTheme.draw_vertical_gradient(self, Rect2(1, 1, w - 2, h - 2), top_color, bottom_color)
+				# Very subtle inner shadow
+				draw_line(Vector2(2, 2), Vector2(w - 2, 2), Color(0, 0, 0, 0.1), 1.0)
+				draw_line(Vector2(2, 2), Vector2(2, h - 2), Color(0, 0, 0, 0.1), 1.0)
 
 		# Grid border
 		draw_rect(Rect2(0, 0, w, h), border_color, false, 1.0)
 
 	func _draw_brick_pattern() -> void:
-		"""Draw a subtle brick pattern on wall tiles."""
+		"""Draw a subtle brick pattern with depth on wall tiles."""
 		var brick_color := VisualTheme.TILE_WALL_ACCENT
+		var brick_shadow := VisualTheme.TILE_WALL_ACCENT.lerp(Color.BLACK, 0.4)
 		var w := size.x
 		var h := size.y
 
-		# Horizontal lines
+		# Horizontal lines with shadow
 		for y_off in [16, 32, 48]:
+			draw_line(Vector2(2, y_off + 1), Vector2(w - 2, y_off + 1), brick_shadow, 1.0)  # Shadow
 			draw_line(Vector2(2, y_off), Vector2(w - 2, y_off), brick_color, 1.0)
 
-		# Vertical lines (offset every other row)
+		# Vertical lines (offset every other row) with shadow
 		for row in range(4):
 			var y_start := row * 16
 			var x_offset := 0 if row % 2 == 0 else 16
 			for x in range(0, int(w), 32):
 				var x_pos := x + x_offset
 				if x_pos > 2 and x_pos < w - 2:
+					draw_line(Vector2(x_pos + 1, y_start + 1), Vector2(x_pos + 1, y_start + 15), brick_shadow, 1.0)  # Shadow
 					draw_line(Vector2(x_pos, y_start + 1), Vector2(x_pos, y_start + 15), brick_color, 1.0)
 
 
 class HighlightDrawer extends Control:
-	"""Custom drawing for tile highlights."""
+	"""Custom drawing for tile highlights with gradients and glow."""
 	enum HighlightType { NONE, MOVE, ATTACK, CAST, SELECTED, RANGE }
 
 	var highlight_type: int = HighlightType.NONE
@@ -512,7 +528,11 @@ class HighlightDrawer extends Control:
 
 		# Hover effect (if no other highlight)
 		if is_hovered and highlight_type == HighlightType.NONE:
-			draw_rect(Rect2(0, 0, w, h), VisualTheme.HIGHLIGHT_HOVER)
+			# Subtle gradient hover
+			var hover_top := Color(1, 1, 1, 0.12)
+			var hover_bottom := Color(1, 1, 1, 0.06)
+			VisualTheme.draw_vertical_gradient(self, Rect2(2, 2, w - 4, h - 4), hover_top, hover_bottom)
+			draw_rect(Rect2(2, 2, w - 4, h - 4), Color(1, 1, 1, 0.25), false, 1.5)
 			return
 
 		if highlight_type == HighlightType.NONE:
@@ -520,32 +540,46 @@ class HighlightDrawer extends Control:
 
 		var fill_color: Color
 		var border_color: Color
+		var glow_color: Color
 
 		match highlight_type:
 			HighlightType.MOVE:
 				fill_color = VisualTheme.HIGHLIGHT_MOVE
 				border_color = VisualTheme.HIGHLIGHT_MOVE_BORDER
+				glow_color = Color(0.3, 0.9, 0.4, 0.3)
 			HighlightType.ATTACK:
 				fill_color = VisualTheme.HIGHLIGHT_ATTACK
 				border_color = VisualTheme.HIGHLIGHT_ATTACK_BORDER
+				glow_color = Color(1.0, 0.3, 0.3, 0.3)
 			HighlightType.CAST:
 				fill_color = VisualTheme.HIGHLIGHT_CAST
 				border_color = VisualTheme.HIGHLIGHT_CAST_BORDER
+				glow_color = Color(0.4, 0.4, 1.0, 0.3)
 			HighlightType.SELECTED:
 				fill_color = VisualTheme.HIGHLIGHT_SELECTED
 				border_color = VisualTheme.HIGHLIGHT_SELECTED_BORDER
+				glow_color = Color(1.0, 0.9, 0.3, 0.35)
 			HighlightType.RANGE:
-				fill_color = Color(0.9, 0.8, 0.2, 0.15)  # Yellow range indicator
-				border_color = Color(0.9, 0.8, 0.2, 0.4)
+				fill_color = Color(0.9, 0.8, 0.2, 0.12)
+				border_color = Color(0.9, 0.8, 0.2, 0.35)
+				glow_color = Color(0.9, 0.8, 0.2, 0.15)
 
-		# Fill
-		draw_rect(Rect2(2, 2, w - 4, h - 4), fill_color)
+		# Outer glow
+		for i in range(2, 0, -1):
+			var g := glow_color
+			g.a = glow_color.a * (1.0 - float(i) / 2.0) * 0.5
+			draw_rect(Rect2(2 - i, 2 - i, w - 4 + i * 2, h - 4 + i * 2), g, false, 1.5)
+
+		# Fill with gradient
+		var fill_top := fill_color.lerp(Color.WHITE, 0.1)
+		var fill_bottom := fill_color
+		VisualTheme.draw_vertical_gradient(self, Rect2(3, 3, w - 6, h - 6), fill_top, fill_bottom)
 
 		# Border
 		draw_rect(Rect2(2, 2, w - 4, h - 4), border_color, false, 2.0)
 
 		# Extra hover brightness
 		if is_hovered:
-			draw_rect(Rect2(0, 0, w, h), Color(1, 1, 1, 0.1))
+			draw_rect(Rect2(3, 3, w - 6, h - 6), Color(1, 1, 1, 0.15))
 
 

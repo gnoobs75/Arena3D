@@ -162,14 +162,17 @@ func _create_ai_hand_bar() -> Control:
 	panel.name = "AIHandBar"
 
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.08, 0.08, 0.12, 0.95)
-	style.border_color = VisualTheme.PLAYER2_COLOR.lerp(Color.BLACK, 0.5)
+	style.bg_color = VisualTheme.GRADIENT_PANEL_TOP
+	style.border_color = VisualTheme.PLAYER2_COLOR.lerp(Color.BLACK, 0.4)
 	style.border_width_bottom = 3
-	style.set_content_margin_all(8)
+	style.set_content_margin_all(VisualTheme.PADDING_PANEL)
+	style.shadow_color = VisualTheme.SHADOW_COLOR
+	style.shadow_size = 6
+	style.shadow_offset = Vector2(0, 3)
 	panel.add_theme_stylebox_override("panel", style)
 
 	var hbox := HBoxContainer.new()
-	hbox.add_theme_constant_override("separation", 10)
+	hbox.add_theme_constant_override("separation", VisualTheme.SPACING_LARGE)
 	panel.add_child(hbox)
 
 	# AI Discard pile button
@@ -214,17 +217,18 @@ func _create_side_panel(player_id: int) -> Control:
 
 	var team_color: Color = VisualTheme.get_player_color(player_id)
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.1, 0.1, 0.14, 0.95)
-	style.border_color = team_color.lerp(Color.BLACK, 0.3)
+	style.bg_color = VisualTheme.GRADIENT_PANEL_TOP  # Will simulate gradient visually
+	style.border_color = team_color.lerp(Color.BLACK, 0.2)
 	style.set_border_width_all(2)
-	style.set_corner_radius_all(6)
-	style.set_content_margin_all(8)
-	style.shadow_color = Color(0, 0, 0, 0.3)
-	style.shadow_size = 4
+	style.set_corner_radius_all(8)
+	style.set_content_margin_all(VisualTheme.PADDING_PANEL)
+	style.shadow_color = VisualTheme.SHADOW_HARD
+	style.shadow_size = 8
+	style.shadow_offset = Vector2(3, 3)
 	panel.add_theme_stylebox_override("panel", style)
 
 	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 8)
+	vbox.add_theme_constant_override("separation", VisualTheme.SPACING_LARGE)
 	panel.add_child(vbox)
 
 	# Player header with mana
@@ -293,15 +297,18 @@ func _create_turn_info_bar() -> Control:
 	var panel := PanelContainer.new()
 
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.1, 0.1, 0.14, 0.95)
-	style.border_color = Color(0.3, 0.3, 0.35)
+	style.bg_color = VisualTheme.GRADIENT_PANEL_TOP
+	style.border_color = VisualTheme.UI_ACCENT.lerp(Color.BLACK, 0.5)
 	style.set_border_width_all(2)
-	style.set_corner_radius_all(6)
-	style.set_content_margin_all(10)
+	style.set_corner_radius_all(8)
+	style.set_content_margin_all(VisualTheme.PADDING_PANEL)
+	style.shadow_color = VisualTheme.SHADOW_HARD
+	style.shadow_size = 8
+	style.shadow_offset = Vector2(3, 3)
 	panel.add_theme_stylebox_override("panel", style)
 
 	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 8)
+	vbox.add_theme_constant_override("separation", VisualTheme.SPACING_MEDIUM)
 	panel.add_child(vbox)
 
 	# Turn info row
@@ -379,11 +386,14 @@ func _create_discard_viewer() -> Control:
 	panel.offset_bottom = 200
 
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.08, 0.08, 0.12, 0.98)
-	style.border_color = Color(0.4, 0.4, 0.45)
+	style.bg_color = VisualTheme.GRADIENT_PANEL_TOP
+	style.border_color = VisualTheme.UI_ACCENT.lerp(Color.WHITE, 0.2)
 	style.set_border_width_all(3)
-	style.set_corner_radius_all(8)
-	style.set_content_margin_all(15)
+	style.set_corner_radius_all(10)
+	style.set_content_margin_all(VisualTheme.PADDING_PANEL + 4)
+	style.shadow_color = VisualTheme.SHADOW_HARD
+	style.shadow_size = 12
+	style.shadow_offset = Vector2(4, 4)
 	panel.add_theme_stylebox_override("panel", style)
 
 	var vbox := VBoxContainer.new()
@@ -423,18 +433,21 @@ func _create_response_panel() -> Control:
 	"""Create the response priority panel."""
 	var panel := PanelContainer.new()
 	panel.set_anchors_preset(Control.PRESET_CENTER)
-	panel.offset_left = -150
-	panel.offset_right = 150
-	panel.offset_top = -75
-	panel.offset_bottom = 75
+	panel.offset_left = -160
+	panel.offset_right = 160
+	panel.offset_top = -80
+	panel.offset_bottom = 80
 	panel.visible = false
 
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.1, 0.1, 0.15, 0.98)
+	style.bg_color = VisualTheme.GRADIENT_PANEL_TOP
 	style.border_color = VisualTheme.UI_ACCENT
 	style.set_border_width_all(3)
-	style.set_corner_radius_all(8)
-	style.set_content_margin_all(15)
+	style.set_corner_radius_all(10)
+	style.set_content_margin_all(VisualTheme.PADDING_PANEL + 4)
+	style.shadow_color = VisualTheme.SHADOW_HARD
+	style.shadow_size = 12
+	style.shadow_offset = Vector2(4, 4)
 	panel.add_theme_stylebox_override("panel", style)
 
 	var vbox := VBoxContainer.new()
@@ -458,29 +471,56 @@ func _create_response_panel() -> Control:
 
 
 func _style_button(button: Button, base_color: Color) -> void:
-	"""Apply styling to a button."""
+	"""Apply styling to a button with shadows and gradients."""
+	# Normal state - gradient with shadow
 	var normal := StyleBoxFlat.new()
-	normal.bg_color = base_color
+	normal.bg_color = base_color.lerp(Color.WHITE, 0.08)  # Slightly lighter (top of gradient)
 	normal.set_border_width_all(1)
-	normal.border_color = base_color.lerp(Color.WHITE, 0.2)
-	normal.set_corner_radius_all(4)
+	normal.border_color = base_color.lerp(Color.WHITE, 0.25)
+	normal.set_corner_radius_all(6)
+	normal.shadow_color = VisualTheme.SHADOW_COLOR
+	normal.shadow_size = 4
+	normal.shadow_offset = Vector2(2, 2)
+	normal.set_content_margin_all(VisualTheme.PADDING_BUTTON)
 
+	# Hover state - brighter with larger shadow
 	var hover := StyleBoxFlat.new()
-	hover.bg_color = base_color.lerp(Color.WHITE, 0.15)
+	hover.bg_color = base_color.lerp(Color.WHITE, 0.2)
 	hover.set_border_width_all(1)
-	hover.border_color = base_color.lerp(Color.WHITE, 0.4)
-	hover.set_corner_radius_all(4)
+	hover.border_color = base_color.lerp(Color.WHITE, 0.45)
+	hover.set_corner_radius_all(6)
+	hover.shadow_color = VisualTheme.SHADOW_COLOR
+	hover.shadow_size = 6
+	hover.shadow_offset = Vector2(3, 3)
+	hover.set_content_margin_all(VisualTheme.PADDING_BUTTON)
 
+	# Pressed state - darker, minimal shadow (pressed in)
 	var pressed := StyleBoxFlat.new()
-	pressed.bg_color = base_color.lerp(Color.BLACK, 0.2)
+	pressed.bg_color = base_color.lerp(Color.BLACK, 0.15)
 	pressed.set_border_width_all(1)
-	pressed.border_color = base_color
-	pressed.set_corner_radius_all(4)
+	pressed.border_color = base_color.lerp(Color.BLACK, 0.1)
+	pressed.set_corner_radius_all(5)
+	pressed.shadow_color = VisualTheme.SHADOW_SOFT
+	pressed.shadow_size = 1
+	pressed.shadow_offset = Vector2(1, 1)
+	pressed.set_content_margin_all(VisualTheme.PADDING_BUTTON)
+
+	# Disabled state
+	var disabled := StyleBoxFlat.new()
+	disabled.bg_color = base_color.lerp(Color(0.3, 0.3, 0.3), 0.6)
+	disabled.set_border_width_all(1)
+	disabled.border_color = Color(0.3, 0.3, 0.35)
+	disabled.set_corner_radius_all(6)
+	disabled.set_content_margin_all(VisualTheme.PADDING_BUTTON)
 
 	button.add_theme_stylebox_override("normal", normal)
 	button.add_theme_stylebox_override("hover", hover)
 	button.add_theme_stylebox_override("pressed", pressed)
+	button.add_theme_stylebox_override("disabled", disabled)
 	button.add_theme_color_override("font_color", Color.WHITE)
+	button.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 0.9))
+	button.add_theme_color_override("font_pressed_color", Color(0.9, 0.9, 0.85))
+	button.add_theme_color_override("font_disabled_color", Color(0.5, 0.5, 0.55))
 
 
 func initialize(state: GameState) -> void:
@@ -759,7 +799,7 @@ class ManaGem extends Control:
 	var is_filled: bool = true
 
 	func _init() -> void:
-		custom_minimum_size = Vector2(18, 18)
+		custom_minimum_size = Vector2(22, 22)
 
 	func set_filled(filled: bool) -> void:
 		is_filled = filled
@@ -767,12 +807,44 @@ class ManaGem extends Control:
 
 	func _draw() -> void:
 		var center := size / 2
-		var radius := 7.0
-		draw_circle(center, radius, Color(0.15, 0.15, 0.2))
-		var fill: Color = Color(0.3, 0.5, 0.9) if is_filled else Color(0.12, 0.12, 0.15)
-		draw_circle(center, radius - 2, fill)
+		var radius := 9.0
+
+		# Shadow
+		draw_circle(center + VisualTheme.SHADOW_OFFSET_SMALL, radius, VisualTheme.SHADOW_SOFT)
+
+		# Outer ring (dark border)
+		draw_circle(center, radius, Color(0.1, 0.1, 0.15))
+
 		if is_filled:
-			draw_circle(center + Vector2(-2, -2), 2, Color(0.6, 0.8, 1.0, 0.4))
+			# Filled gem - gradient effect with concentric circles
+			var outer_color := VisualTheme.GRADIENT_MANA_FILLED_BOTTOM
+			var inner_color := VisualTheme.GRADIENT_MANA_FILLED_TOP
+			var mid_color := outer_color.lerp(inner_color, 0.5)
+
+			draw_circle(center, radius - 1.5, outer_color)
+			draw_circle(center, radius - 3, mid_color)
+			draw_circle(center, radius - 5, inner_color)
+
+			# Shine highlights
+			draw_circle(center + Vector2(-2.5, -2.5), 2.5, Color(0.7, 0.9, 1.0, 0.5))
+			draw_circle(center + Vector2(2, 3), 1.5, Color(0.5, 0.7, 1.0, 0.25))
+
+			# Outer glow
+			for i in range(3, 0, -1):
+				var glow_alpha := 0.1 * (1.0 - float(i) / 3.0)
+				draw_arc(center, radius + i, 0, TAU, 24, Color(0.4, 0.6, 1.0, glow_alpha), 1.5)
+		else:
+			# Empty gem - recessed/inset look
+			var outer_color := VisualTheme.GRADIENT_MANA_EMPTY_BOTTOM
+			var inner_color := VisualTheme.GRADIENT_MANA_EMPTY_TOP
+
+			draw_circle(center, radius - 1.5, outer_color)
+			draw_circle(center, radius - 4, inner_color)
+
+			# Inset shadow (top-left darker)
+			draw_arc(center, radius - 2, PI * 0.75, PI * 1.75, 16, Color(0, 0, 0, 0.3), 2.0)
+			# Inset highlight (bottom-right lighter)
+			draw_arc(center, radius - 2, PI * 1.75, PI * 2.75, 16, Color(1, 1, 1, 0.1), 1.5)
 
 
 class ChampionPortrait extends Control:
@@ -786,7 +858,7 @@ class ChampionPortrait extends Control:
 	var _portrait_texture: Texture2D = null
 
 	const WIDTH := 200
-	const HEIGHT := 200
+	const HEIGHT := 210  # Slightly taller for better spacing
 	const CHARACTER_ART_PATH := "res://assets/art/characters/"
 
 	func _init() -> void:
@@ -835,31 +907,40 @@ class ChampionPortrait extends Control:
 		var is_alive := champion.is_alive()
 		var font := ThemeDB.fallback_font
 
+		# === DROP SHADOW ===
+		draw_rect(Rect2(VisualTheme.SHADOW_OFFSET_LARGE.x, VisualTheme.SHADOW_OFFSET_LARGE.y, w, h), VisualTheme.SHADOW_HARD)
+
 		# Selection glow
 		if _is_selected and is_alive:
 			var pulse := (sin(_glow_timer) + 1.0) * 0.5
-			for i in range(3, 0, -1):
-				var glow := Color(1.0, 1.0, 0.4, 0.3 * pulse * (1.0 - float(i) / 3.0))
-				draw_rect(Rect2(-i * 2, -i * 2, w + i * 4, h + i * 4), glow, false, 2.0)
+			for i in range(4, 0, -1):
+				var glow := Color(1.0, 0.95, 0.4, 0.35 * pulse * (1.0 - float(i) / 4.0))
+				draw_rect(Rect2(-i * 2, -i * 2, w + i * 4, h + i * 4), glow, false, 2.5)
 
-		# Frame
-		var frame_color: Color = team_color if is_alive else Color(0.25, 0.25, 0.28)
-		draw_rect(Rect2(0, 0, w, h), frame_color)
+		# Frame with gradient
+		var frame_top: Color = team_color.lerp(Color.WHITE, 0.15) if is_alive else Color(0.3, 0.3, 0.33)
+		var frame_bottom: Color = team_color.lerp(Color.BLACK, 0.15) if is_alive else Color(0.2, 0.2, 0.23)
+		VisualTheme.draw_vertical_gradient(self, Rect2(0, 0, w, h), frame_top, frame_bottom)
 
-		# Inner
-		var inner := Rect2(2, 2, w - 4, h - 4)
-		var bg: Color = champ_colors["primary"].lerp(Color(0.08, 0.09, 0.12), 0.75) if is_alive else Color(0.1, 0.1, 0.12)
-		draw_rect(inner, bg)
+		# Bevel on frame
+		VisualTheme.draw_bevel(self, Rect2(0, 0, w, h), 1.5)
 
-		# Portrait area
-		var portrait_h := 70.0
-		var portrait_rect := Rect2(6, 6, w - 12, portrait_h)
-		draw_rect(portrait_rect, champ_colors["primary"].lerp(Color.BLACK, 0.5))
-		draw_rect(portrait_rect, champ_colors["secondary"].lerp(Color.WHITE, 0.1), false, 1.0)
+		# Inner background with gradient
+		var inner := Rect2(3, 3, w - 6, h - 6)
+		var bg_top: Color = champ_colors["secondary"].lerp(Color(0.12, 0.13, 0.16), 0.7) if is_alive else Color(0.12, 0.12, 0.14)
+		var bg_bottom: Color = champ_colors["primary"].lerp(Color(0.08, 0.09, 0.12), 0.8) if is_alive else Color(0.1, 0.1, 0.12)
+		VisualTheme.draw_vertical_gradient(self, inner, bg_top, bg_bottom)
+
+		# Portrait area with inset
+		var portrait_h := 75.0
+		var portrait_rect := Rect2(8, 8, w - 16, portrait_h)
+
+		# Portrait shadow (inset)
+		draw_rect(portrait_rect, champ_colors["primary"].lerp(Color.BLACK, 0.6))
+		VisualTheme.draw_inset(self, portrait_rect)
 
 		# Portrait image or fallback symbol
 		if _portrait_texture != null:
-			# Draw the portrait texture
 			var tex_size := _portrait_texture.get_size()
 			var scale_x := portrait_rect.size.x / tex_size.x
 			var scale_y := portrait_rect.size.y / tex_size.y
@@ -871,61 +952,90 @@ class ChampionPortrait extends Control:
 
 			var modulate: Color = Color.WHITE if is_alive else Color(0.5, 0.5, 0.5)
 			draw_texture_rect(_portrait_texture, Rect2(draw_pos, scaled_size), false, modulate)
+
+			# Vignette overlay
+			var vig_rect := Rect2(portrait_rect.position.x, portrait_rect.position.y + portrait_rect.size.y * 0.6, portrait_rect.size.x, portrait_rect.size.y * 0.4)
+			VisualTheme.draw_vertical_gradient(self, vig_rect, Color(0, 0, 0, 0), Color(0, 0, 0, 0.4))
 		else:
 			# Fallback to symbol
 			var symbol := VisualTheme.get_champion_symbol(champion.champion_name)
 			var sym_color: Color = champ_colors["secondary"] if is_alive else Color(0.35, 0.35, 0.38)
-			draw_string(font, Vector2(w / 2 - 12, portrait_h / 2 + 18), symbol, HORIZONTAL_ALIGNMENT_CENTER, -1, 32, sym_color)
+			VisualTheme.draw_text_shadow(self, font, Vector2(w / 2 - 12, portrait_h / 2 + 18), symbol, 32, sym_color)
 
-		var y := portrait_h + 10
+		var y := portrait_h + 14
 
-		# Name
-		var name_rect := Rect2(6, y, w - 12, 22)
-		draw_rect(name_rect, champ_colors["primary"].lerp(Color.BLACK, 0.4))
+		# Name bar with gradient
+		var name_rect := Rect2(8, y, w - 16, 24)
+		var name_top: Color = champ_colors["primary"].lerp(Color.WHITE, 0.1)
+		var name_bottom: Color = champ_colors["primary"].lerp(Color.BLACK, 0.3)
+		VisualTheme.draw_vertical_gradient(self, name_rect, name_top, name_bottom)
+		draw_rect(name_rect, champ_colors["secondary"].lerp(Color.WHITE, 0.15), false, 1.0)
+
+		# Name text with shadow
 		var name_col: Color = Color.WHITE if is_alive else Color(0.5, 0.5, 0.52)
-		draw_string(font, Vector2(10, y + 16), champion.champion_name.to_upper(), HORIZONTAL_ALIGNMENT_LEFT, int(w) - 20, 11, name_col)
-		y += 26
+		VisualTheme.draw_text_shadow(self, font, Vector2(12, y + 17), champion.champion_name.to_upper(), 12, name_col)
+		y += 30
 
-		# HP bar
-		var hp_rect := Rect2(6, y, w - 12, 16)
-		draw_rect(hp_rect, Color(0.08, 0.08, 0.1))
+		# HP bar with shadow and gradient
+		var hp_rect := Rect2(8, y, w - 16, 18)
+		# HP bar shadow
+		draw_rect(Rect2(hp_rect.position + Vector2(1, 1), hp_rect.size), VisualTheme.SHADOW_SOFT)
+		# HP bar background
+		draw_rect(hp_rect, Color(0.06, 0.06, 0.08))
+		VisualTheme.draw_inset(self, hp_rect)
+
 		var hp_pct := float(champion.current_hp) / float(champion.max_hp) if champion.max_hp > 0 else 0.0
-		var hp_fill := Rect2(7, y + 1, (w - 14) * hp_pct, 14)
-		var hp_col: Color = _get_hp_color(hp_pct) if is_alive else Color(0.25, 0.12, 0.12)
-		draw_rect(hp_fill, hp_col)
-		draw_rect(hp_rect, Color(0.3, 0.3, 0.35), false, 1.0)
-		draw_string(font, Vector2(w / 2 - 14, y + 12), "%d/%d" % [champion.current_hp, champion.max_hp], HORIZONTAL_ALIGNMENT_CENTER, -1, 10, Color.WHITE)
-		y += 22
+		var hp_fill := Rect2(hp_rect.position.x + 1, hp_rect.position.y + 1, (hp_rect.size.x - 2) * hp_pct, hp_rect.size.y - 2)
 
-		# Stats
-		var stat_w := (w - 20) / 3.0
-		_draw_stat(font, 6, y, stat_w, "PWR", champion.current_power, _base_power, Color(0.85, 0.3, 0.25), is_alive)
-		_draw_stat(font, 10 + stat_w, y, stat_w, "RNG", champion.current_range, _base_range, Color(0.3, 0.55, 0.85), is_alive)
-		_draw_stat(font, 14 + stat_w * 2, y, stat_w, "MOV", champion.current_movement, _base_movement, Color(0.3, 0.75, 0.4), is_alive)
+		if hp_pct > 0:
+			var hp_colors := VisualTheme.get_hp_gradient_colors(hp_pct) if is_alive else [Color(0.3, 0.15, 0.15), Color(0.2, 0.1, 0.1)]
+			VisualTheme.draw_vertical_gradient(self, hp_fill, hp_colors[0], hp_colors[1])
+			# Shine on HP bar
+			draw_line(Vector2(hp_fill.position.x, hp_fill.position.y + 2), Vector2(hp_fill.end.x, hp_fill.position.y + 2), Color(1, 1, 1, 0.25), 1.0)
+
+		draw_rect(hp_rect, Color(0.35, 0.35, 0.4), false, 1.0)
+		VisualTheme.draw_text_shadow(self, font, Vector2(w / 2 - 16, y + 14), "%d/%d" % [champion.current_hp, champion.max_hp], 11, Color.WHITE)
+		y += 24
+
+		# Stats with shadows and spacing
+		var stat_w := (w - 24) / 3.0
+		var stat_gap := 4.0
+		_draw_stat(font, 8, y, stat_w, "PWR", champion.current_power, _base_power, Color(0.85, 0.3, 0.25), is_alive)
+		_draw_stat(font, 8 + stat_w + stat_gap, y, stat_w, "RNG", champion.current_range, _base_range, Color(0.3, 0.55, 0.85), is_alive)
+		_draw_stat(font, 8 + (stat_w + stat_gap) * 2, y, stat_w, "MOV", champion.current_movement, _base_movement, Color(0.3, 0.75, 0.4), is_alive)
 
 		# Death overlay
 		if not is_alive:
-			draw_rect(inner, Color(0, 0, 0, 0.5))
-			draw_string(font, Vector2(w / 2 - 28, h / 2), "DEFEATED", HORIZONTAL_ALIGNMENT_CENTER, -1, 12, Color(1, 0.8, 0.8))
+			draw_rect(inner, Color(0, 0, 0, 0.55))
+			VisualTheme.draw_text_shadow(self, font, Vector2(w / 2 - 32, h / 2), "DEFEATED", 14, Color(1, 0.8, 0.8), Vector2(2, 2), Color(0, 0, 0, 0.8))
 
 	func _draw_stat(font: Font, x: float, y: float, w: float, label: String, current: int, base: int, color: Color, alive: bool) -> void:
-		var bg: Color = color.lerp(Color.BLACK, 0.75) if alive else Color(0.12, 0.12, 0.14)
-		draw_rect(Rect2(x, y, w, 32), bg)
-		draw_rect(Rect2(x, y, w, 32), color.lerp(Color.BLACK, 0.4) if alive else Color(0.2, 0.2, 0.22), false, 1.0)
-		draw_string(ThemeDB.fallback_font, Vector2(x + w / 2 - 8, y + 10), label, HORIZONTAL_ALIGNMENT_CENTER, -1, 8, Color(0.6, 0.6, 0.65) if alive else Color(0.35, 0.35, 0.38))
-		var val_col: Color = color.lerp(Color.WHITE, 0.4) if alive else Color(0.4, 0.4, 0.42)
+		var stat_rect := Rect2(x, y, w, 36)
+
+		# Stat box shadow
+		draw_rect(Rect2(stat_rect.position + Vector2(1, 1), stat_rect.size), VisualTheme.SHADOW_SOFT)
+
+		# Stat box background gradient
+		var bg_top: Color = color.lerp(Color.BLACK, 0.65) if alive else Color(0.14, 0.14, 0.16)
+		var bg_bottom: Color = color.lerp(Color.BLACK, 0.8) if alive else Color(0.1, 0.1, 0.12)
+		VisualTheme.draw_vertical_gradient(self, stat_rect, bg_top, bg_bottom)
+
+		# Stat box border with bevel
+		var border_color := color.lerp(Color.BLACK, 0.3) if alive else Color(0.22, 0.22, 0.25)
+		draw_rect(stat_rect, border_color, false, 1.0)
+		VisualTheme.draw_bevel(self, stat_rect, 1.0, Color(1, 1, 1, 0.1), Color(0, 0, 0, 0.15))
+
+		# Label with shadow
+		var label_col := Color(0.65, 0.65, 0.7) if alive else Color(0.4, 0.4, 0.43)
+		VisualTheme.draw_text_shadow(self, font, Vector2(x + w / 2 - 10, y + 12), label, VisualTheme.FONT_STAT_LABEL, label_col)
+
+		# Value with shadow and buff/debuff coloring
+		var val_col: Color = color.lerp(Color.WHITE, 0.5) if alive else Color(0.45, 0.45, 0.48)
 		if current > base and alive:
 			val_col = Color(0.3, 1.0, 0.4)
 		elif current < base and alive:
 			val_col = Color(1.0, 0.4, 0.3)
-		draw_string(ThemeDB.fallback_font, Vector2(x + w / 2 - 4, y + 26), str(current), HORIZONTAL_ALIGNMENT_CENTER, -1, 14, val_col)
-
-	func _get_hp_color(pct: float) -> Color:
-		if pct > 0.6:
-			return Color(0.3, 0.7, 0.35)
-		elif pct > 0.3:
-			return Color(0.8, 0.7, 0.2)
-		return Color(0.8, 0.25, 0.2)
+		VisualTheme.draw_text_shadow(self, font, Vector2(x + w / 2 - 6, y + 29), str(current), VisualTheme.FONT_STAT_VALUE, val_col)
 
 
 class FloatingCombatText extends Control:

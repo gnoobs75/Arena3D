@@ -26,6 +26,10 @@ var winner: int = 0
 var player1_mana: int = 5
 var player2_mana: int = 5
 
+# Locked mana (reduces mana gained at start of next turn)
+var player1_locked_mana: int = 0
+var player2_locked_mana: int = 0
+
 # Champions (2 per player)
 var player1_champions: Array[ChampionState] = []
 var player2_champions: Array[ChampionState] = []
@@ -37,6 +41,10 @@ var player1_deck: Array[String] = []
 var player2_deck: Array[String] = []
 var player1_discard: Array[String] = []
 var player2_discard: Array[String] = []
+
+# Response slots - one card per player that auto-triggers when conditions met
+var player1_response_slot: String = ""  # Card name or empty
+var player2_response_slot: String = ""
 
 # Board terrain (10x10)
 var board_terrain: Array = []  # 2D array of Terrain enum
@@ -80,6 +88,8 @@ func duplicate() -> GameState:
 
 	copy.player1_mana = player1_mana
 	copy.player2_mana = player2_mana
+	copy.player1_locked_mana = player1_locked_mana
+	copy.player2_locked_mana = player2_locked_mana
 
 	# Deep copy champions
 	for champion: ChampionState in player1_champions:
@@ -94,6 +104,10 @@ func duplicate() -> GameState:
 	copy.player2_deck = player2_deck.duplicate()
 	copy.player1_discard = player1_discard.duplicate()
 	copy.player2_discard = player2_discard.duplicate()
+
+	# Copy response slots
+	copy.player1_response_slot = player1_response_slot
+	copy.player2_response_slot = player2_response_slot
 
 	# Deep copy board
 	copy.board_terrain = []
@@ -192,16 +206,61 @@ func _draw_initial_hands() -> void:
 # --- Card Operations ---
 
 func draw_card(player_id: int) -> String:
-	"""Draw a card for player. Returns card name or empty if deck empty."""
+	"""Draw a card for player. Returns card name or empty if deck empty.
+	Cards belonging to dead champions are automatically discarded."""
 	var deck := get_deck(player_id)
 	var hand := get_hand(player_id)
+	var discard := get_discard(player_id)
 
-	if deck.is_empty():
-		return ""
+	while not deck.is_empty():
+		var card_name: String = deck.pop_back()
+		var card_data := CardDatabase.get_card(card_name)
+		var champion_name: String = card_data.get("character", "")
 
-	var card_name: String = deck.pop_back()
-	hand.append(card_name)
-	return card_name
+		# Check if this card's champion is dead
+		if _is_champion_dead_by_name(player_id, champion_name):
+			# Card goes directly to discard
+			discard.append(card_name)
+			continue
+
+		# Valid card - add to hand
+		hand.append(card_name)
+		return card_name
+
+	return ""
+
+
+func _is_champion_dead_by_name(player_id: int, champion_name: String) -> bool:
+	"""Check if a champion with the given name is dead for this player."""
+	for champion: ChampionState in get_champions(player_id):
+		if champion.champion_name == champion_name:
+			return champion.is_dead()
+	# Champion not found for this player - shouldn't happen but treat as dead
+	return true
+
+
+func discard_dead_champion_cards(player_id: int, champion_name: String) -> int:
+	"""Discard all cards in hand belonging to a dead champion.
+	Returns the number of cards discarded."""
+	var hand := get_hand(player_id)
+	var discard := get_discard(player_id)
+	var discarded_count := 0
+
+	# Iterate backwards to safely remove while iterating
+	for i in range(hand.size() - 1, -1, -1):
+		var card_name: String = hand[i]
+		var card_data := CardDatabase.get_card(card_name)
+		var card_champion: String = card_data.get("character", "")
+
+		if card_champion == champion_name:
+			hand.remove_at(i)
+			discard.append(card_name)
+			discarded_count += 1
+
+	if discarded_count > 0:
+		print("Discarded %d cards for dead champion %s (player %d)" % [discarded_count, champion_name, player_id])
+
+	return discarded_count
 
 
 func discard_card(player_id: int, card_name: String) -> bool:
@@ -216,6 +275,84 @@ func discard_card(player_id: int, card_name: String) -> bool:
 	hand.remove_at(index)
 	discard.append(card_name)
 	return true
+
+
+# --- Response Slot Operations ---
+
+func get_response_slot(player_id: int) -> String:
+	"""Get the card in player's response slot (empty string if none)."""
+	return player1_response_slot if player_id == 1 else player2_response_slot
+
+
+func set_response_slot(player_id: int, card_name: String) -> bool:
+	"""Place a card from hand into the response slot. Returns success."""
+	var hand := get_hand(player_id)
+
+	# If there's already a card in the slot, return it to hand first
+	var current_slot := get_response_slot(player_id)
+	if not current_slot.is_empty():
+		hand.append(current_slot)
+
+	# If setting to empty, just clear the slot
+	if card_name.is_empty():
+		if player_id == 1:
+			player1_response_slot = ""
+		else:
+			player2_response_slot = ""
+		return true
+
+	# Find and remove card from hand
+	var index := hand.find(card_name)
+	if index == -1:
+		return false
+
+	# Verify it's a response card
+	var card_data := CardDatabase.get_card(card_name)
+	if card_data.get("type", "") != "Response":
+		return false
+
+	hand.remove_at(index)
+
+	if player_id == 1:
+		player1_response_slot = card_name
+	else:
+		player2_response_slot = card_name
+
+	return true
+
+
+func clear_response_slot(player_id: int) -> String:
+	"""Remove card from response slot and return it to hand. Returns the card name."""
+	var card_name := get_response_slot(player_id)
+	if card_name.is_empty():
+		return ""
+
+	var hand := get_hand(player_id)
+	hand.append(card_name)
+
+	if player_id == 1:
+		player1_response_slot = ""
+	else:
+		player2_response_slot = ""
+
+	return card_name
+
+
+func discard_response_slot(player_id: int) -> String:
+	"""Remove card from response slot and put it in discard. Returns the card name."""
+	var card_name := get_response_slot(player_id)
+	if card_name.is_empty():
+		return ""
+
+	var discard := get_discard(player_id)
+	discard.append(card_name)
+
+	if player_id == 1:
+		player1_response_slot = ""
+	else:
+		player2_response_slot = ""
+
+	return card_name
 
 
 func play_card(player_id: int, card_name: String) -> bool:
@@ -261,11 +398,116 @@ func spend_mana(player_id: int, amount: int) -> bool:
 
 
 func reset_mana(player_id: int) -> void:
-	"""Reset mana to 5 at start of turn."""
+	"""Reset mana to 5 at start of turn, minus any locked mana."""
 	if player_id == 1:
-		player1_mana = 5
+		var locked := player1_locked_mana
+		player1_mana = maxi(0, 5 - locked)
+		player1_locked_mana = 0  # Clear locked mana after applying
+		if locked > 0:
+			print("Player 1 mana reset to %d (was locked: %d)" % [player1_mana, locked])
 	else:
-		player2_mana = 5
+		var locked := player2_locked_mana
+		player2_mana = maxi(0, 5 - locked)
+		player2_locked_mana = 0
+		if locked > 0:
+			print("Player 2 mana reset to %d (was locked: %d)" % [player2_mana, locked])
+
+
+func lock_mana(player_id: int, amount: int) -> void:
+	"""Lock mana for next turn (Mana Burn effect)."""
+	if player_id == 1:
+		player1_locked_mana += amount
+	else:
+		player2_locked_mana += amount
+	print("Player %d has %d mana locked for next turn" % [player_id, amount])
+
+
+func get_locked_mana(player_id: int) -> int:
+	"""Get amount of locked mana for player."""
+	return player1_locked_mana if player_id == 1 else player2_locked_mana
+
+
+func add_mana(player_id: int, amount: int) -> void:
+	"""Add mana to player (gainMana effect)."""
+	if player_id == 1:
+		player1_mana += amount
+	else:
+		player2_mana += amount
+	print("Player %d gained %d mana" % [player_id, amount])
+
+
+func steal_mana(from_player: int, to_player: int, amount: int) -> int:
+	"""Steal mana from one player to another. Returns actual amount stolen."""
+	var current := get_mana(from_player)
+	var stolen := mini(amount, current)
+
+	if stolen > 0:
+		spend_mana(from_player, stolen)
+		add_mana(to_player, stolen)
+		print("Player %d stole %d mana from Player %d" % [to_player, stolen, from_player])
+
+	return stolen
+
+
+func shuffle_discard_into_deck(player_id: int) -> int:
+	"""Shuffle all cards from discard pile into deck. Returns number of cards shuffled."""
+	var discard := get_discard(player_id)
+	var deck := get_deck(player_id)
+
+	var count := discard.size()
+	if count == 0:
+		return 0
+
+	deck.append_array(discard)
+	discard.clear()
+	deck.shuffle()
+
+	print("Player %d shuffled %d cards from discard into deck" % [player_id, count])
+	return count
+
+
+func return_card_to_hand(player_id: int, card_name: String) -> bool:
+	"""Return a card from discard to hand. Returns success."""
+	var discard := get_discard(player_id)
+	var hand := get_hand(player_id)
+
+	var index := discard.find(card_name)
+	if index == -1:
+		return false
+
+	discard.remove_at(index)
+	hand.append(card_name)
+	print("Player %d returned %s to hand from discard" % [player_id, card_name])
+	return true
+
+
+func can_cast_from_discard(player_id: int) -> bool:
+	"""Check if player has castFromDiscard buff on any champion."""
+	for champion: ChampionState in get_champions(player_id):
+		if champion.is_alive() and champion.has_buff("castFromDiscard"):
+			return true
+	return false
+
+
+func get_castable_from_discard(player_id: int) -> Array[String]:
+	"""Get list of cards that can be cast from discard."""
+	if not can_cast_from_discard(player_id):
+		return []
+
+	var castable: Array[String] = []
+	var discard := get_discard(player_id)
+	var mana := get_mana(player_id)
+
+	for card_name: String in discard:
+		var card_data := CardDatabase.get_card(card_name)
+		var card_type: String = card_data.get("type", "")
+		var cost: int = card_data.get("cost", 0)
+
+		# Only Action cards can be cast from discard
+		if card_type == "Action" and cost <= mana:
+			castable.append(card_name)
+
+	return castable
 
 
 # --- Champion Queries ---

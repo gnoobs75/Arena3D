@@ -171,6 +171,41 @@ const BUFFS: Dictionary = {
 		"category": BuffCategory.SPECIAL,
 		"stackable": false,
 		"description": "Copy target's stats"
+	},
+	"critical": {
+		"category": BuffCategory.DAMAGE_MODIFIER,
+		"stackable": false,
+		"description": "50% chance to deal double damage"
+	},
+	"returnDamage": {
+		"category": BuffCategory.DAMAGE_MODIFIER,
+		"stackable": false,
+		"description": "Reflect combat damage back to attacker"
+	},
+	"redirectDamage": {
+		"category": BuffCategory.DAMAGE_MODIFIER,
+		"stackable": false,
+		"description": "Redirect damage to attacker instead"
+	},
+	"elkRestoration": {
+		"category": BuffCategory.SPECIAL,
+		"stackable": false,
+		"description": "Heal all friendlies when dealing combat damage"
+	},
+	"apeSmash": {
+		"category": BuffCategory.SPECIAL,
+		"stackable": false,
+		"description": "Splash 1 damage to other enemies in range on combat damage"
+	},
+	"attackHeals": {
+		"category": BuffCategory.SPECIAL,
+		"stackable": false,
+		"description": "Attack can heal friendly targets instead of damaging"
+	},
+	"freeRangerCard": {
+		"category": BuffCategory.SPECIAL,
+		"stackable": false,
+		"description": "Play one Ranger card for free this turn"
 	}
 }
 
@@ -316,11 +351,18 @@ static func prevents_action(champion: ChampionState, action_type: String) -> boo
 	return false
 
 
-static func calculate_damage_modifier(champion: ChampionState, base_damage: int, is_incoming: bool) -> int:
-	"""Calculate modified damage based on buffs/debuffs."""
+static func calculate_damage_modifier(champion: ChampionState, base_damage: int, is_incoming: bool, context: Dictionary = {}) -> int:
+	"""Calculate modified damage based on buffs/debuffs.
+	context can include: is_aoe (bool), is_combat (bool), attacker (ChampionState)"""
 	var damage := base_damage
 
 	if is_incoming:
+		# Stealth (ignore non-AOE damage) - Stealth Flask
+		if champion.has_buff("stealth"):
+			var is_aoe: bool = context.get("is_aoe", false)
+			if not is_aoe:
+				return 0  # Stealth ignores non-AOE damage
+
 		# Incoming damage modifiers
 		if champion.has_buff("negateDamage"):
 			champion.remove_buff("negateDamage")

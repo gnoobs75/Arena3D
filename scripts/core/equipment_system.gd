@@ -93,15 +93,25 @@ func use_equipment(champion: ChampionState, card_name: String, targets: Array = 
 	equip_data["charges_remaining"] = charges - 1
 	equipment_used.emit(champion.unique_id, card_name, charges - 1)
 
+	# Check for boostFlasks buff - doubles flask effects
+	var is_flask := card_name.to_lower().contains("flask")
+	var boosted := false
+	if is_flask and champion.has_buff("boostFlasks"):
+		boosted = true
+		champion.remove_buff("boostFlasks")  # Consume the buff
+		print("Boosted flask! %s effect doubled" % card_name)
+
 	# Process use effects
 	var results: Array = []
 	var use_effects: Array = equip_data.get("use_effects", [])
 
 	if not use_effects.is_empty():
 		var effect_processor := EffectProcessor.new(game_state)
-		for effect: Dictionary in use_effects:
-			var result := effect_processor._process_single_effect(effect, champion, targets, {})
-			results.append(result)
+		var times := 2 if boosted else 1
+		for _i in range(times):
+			for effect: Dictionary in use_effects:
+				var result := effect_processor._process_single_effect(effect, champion, targets, {})
+				results.append(result)
 
 	# Check if depleted
 	if charges - 1 <= 0:

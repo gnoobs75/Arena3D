@@ -11,6 +11,10 @@ signal action_performed(action: Dictionary)
 signal response_window_opened(trigger: String, context: Dictionary)
 signal response_window_closed()
 signal champion_died(champion_id: String)
+signal response_slot_triggered(player_id: int, card_name: String, trigger: String)
+signal x_value_required(player_id: int, card_name: String, min_val: int, max_val: int)
+signal choice_required(player_id: int, options: Array, choose_count: int, context: Dictionary)
+signal position_selection_required(player_id: int, valid_positions: Array, context: Dictionary)
 
 # Core systems
 var game_state: GameState
@@ -28,6 +32,28 @@ var is_game_active: bool = false
 # Pending action awaiting response resolution
 var _pending_action: Dictionary = {}
 var _pending_action_type: String = ""
+
+# Damage context tracking for effects like Spell Punish (adjacentToSource)
+var _damage_context: Dictionary = {}  # attacker_id, damage_source_type, source_card
+
+
+func set_damage_context(attacker_id: String, source_type: String, source_card: String = "") -> void:
+	"""Set damage context for triggered effects that need to know the source."""
+	_damage_context = {
+		"attacker_id": attacker_id,
+		"damage_source_type": source_type,  # "combat", "spell", "effect"
+		"source_card": source_card
+	}
+
+
+func get_damage_context() -> Dictionary:
+	"""Get current damage context."""
+	return _damage_context
+
+
+func clear_damage_context() -> void:
+	"""Clear damage context after resolution."""
+	_damage_context = {}
 
 
 func initialize(p1_champions: Array[String], p2_champions: Array[String]) -> bool:
@@ -63,6 +89,11 @@ func _connect_signals() -> void:
 	response_stack.response_window_opened.connect(_on_response_window_opened)
 	response_stack.response_window_closed.connect(_on_response_window_closed)
 	response_stack.stack_resolved.connect(_on_response_stack_resolved)
+
+	# Connect effect processor signals for player input
+	effect_processor.x_value_required.connect(_on_x_value_required)
+	effect_processor.choice_required.connect(_on_choice_required)
+	effect_processor.position_selection_required.connect(_on_position_required)
 
 
 func start_game() -> void:
@@ -149,12 +180,16 @@ func attack_champion(attacker_id: String, target_id: String) -> Dictionary:
 	if not action.is_valid(game_state):
 		return {"success": false, "error": "Invalid attack"}
 
+	# Set damage context for combat
+	set_damage_context(attacker_id, "combat", "")
+
 	# Check for beforeDamage responses
 	var target := game_state.get_champion(target_id)
 	var damage: int = attacker.current_power
 
-	# Apply damage modifiers from buffs
-	damage = BuffRegistry.calculate_damage_modifier(target, damage, true)
+	# Apply damage modifiers from buffs (including stealth check with combat context)
+	var damage_context := {"is_aoe": false, "is_combat": true, "attacker": attacker}
+	damage = BuffRegistry.calculate_damage_modifier(target, damage, true, damage_context)
 
 	if _check_trigger("beforeDamage", {
 		"attacker": attacker_id,
@@ -206,12 +241,22 @@ func _execute_attack(action: ActionSystem.AttackAction) -> Dictionary:
 		if target and target.is_dead():
 			# Check cheat death
 			if not BuffRegistry.check_cheat_death(target):
-				champion_died.emit(action.target_id)
-				EventBus.champion_died.emit(action.target_id, action.attacker_id)
+				_handle_champion_death(action.target_id, action.attacker_id)
 				_check_win_condition()
+
+		# Also check if attacker died (from returnDamage or redirectDamage)
+		var attacker := game_state.get_champion(action.attacker_id)
+		if attacker and attacker.is_dead():
+			if not BuffRegistry.check_cheat_death(attacker):
+				_handle_champion_death(action.attacker_id, action.target_id)
+				_check_win_condition()
+
+		# Clear damage context after combat resolution
+		clear_damage_context()
 
 		return result
 
+	clear_damage_context()
 	return {"success": false, "error": "Attack failed"}
 
 
@@ -234,10 +279,14 @@ func cast_card(card_name: String, caster_id: String, targets: Array = []) -> Dic
 	if card_type == "Equipment":
 		return _cast_equipment(card_name, caster, targets)
 
+	# Set damage context for spell damage
+	set_damage_context(caster_id, "spell", card_name)
+
 	# Create and validate action
 	var action := ActionSystem.CastCardAction.new(card_name, caster_id, targets)
 
 	if not action.is_valid(game_state):
+		clear_damage_context()
 		return {"success": false, "error": "Cannot cast card"}
 
 	# Check for onCast responses
@@ -281,16 +330,36 @@ func _execute_cast(action: ActionSystem.CastCardAction, targets: Array) -> Dicti
 
 		action_performed.emit(result)
 
+		# Check for returnToHand effect (50% chance card returns to hand)
+		var card_returned := false
+		for eff: Dictionary in card_data.get("effect", []):
+			if eff.get("name") == "returnToHand" or eff.get("buff") == "returnToHand":
+				if randi() % 2 == 0:  # 50% chance
+					# Remove from discard and return to hand
+					var discard := game_state.get_discard(caster.owner_id)
+					var idx := discard.rfind(action.card_name)
+					if idx >= 0:
+						discard.remove_at(idx)
+						game_state.get_hand(caster.owner_id).append(action.card_name)
+						card_returned = true
+						print("%s returned to hand (returnToHand triggered)" % action.card_name)
+				break
+
+		result["card_returned"] = card_returned
+
 		# Check for deaths
 		for champ: ChampionState in game_state.get_all_champions():
 			if champ.is_dead() and not BuffRegistry.check_cheat_death(champ):
-				champion_died.emit(champ.unique_id)
-				EventBus.champion_died.emit(champ.unique_id, action.caster_id)
+				_handle_champion_death(champ.unique_id, action.caster_id)
 
 		_check_win_condition()
 
+		# Clear damage context after spell resolution
+		clear_damage_context()
+
 		return result
 
+	clear_damage_context()
 	return {"success": false, "error": "Cast failed"}
 
 
@@ -456,9 +525,205 @@ func _validate_champion_action(champion: ChampionState) -> bool:
 	return true
 
 
+func _handle_champion_death(champion_id: String, killer_id: String) -> void:
+	"""Handle all effects of a champion dying."""
+	var champion := game_state.get_champion(champion_id)
+	if champion == null:
+		return
+
+	# Prevent processing the same death multiple times
+	if champion.death_processed:
+		return
+	champion.death_processed = true
+
+	# Check for spectreEssence - killer gains power from kills
+	if not killer_id.is_empty():
+		var killer := game_state.get_champion(killer_id)
+		if killer and killer.is_alive() and killer.has_buff("spectreEssence"):
+			killer.add_buff("powerBonus", -1, 1, "SpectreEssence")
+			print("Spectre Essence: %s gained +1 power from killing %s" % [killer.champion_name, champion.champion_name])
+
+	# Discard all cards in hand belonging to this champion
+	game_state.discard_dead_champion_cards(champion.owner_id, champion.champion_name)
+
+	# Emit death signals
+	champion_died.emit(champion_id)
+	EventBus.champion_died.emit(champion_id, killer_id)
+
+
 func _check_trigger(trigger: String, context: Dictionary) -> bool:
-	"""Check and open response window if applicable."""
-	return response_stack.open_window(trigger, context, game_state.active_player)
+	"""Check triggers and auto-cast from response slots if applicable.
+	With the Response Slot system, responses are automatic - no window needed."""
+	# Check both players' response slots (responding player first, then active player)
+	var responding_player := _get_responding_player_for_trigger(trigger, context)
+	var active := game_state.active_player
+
+	# Try responding player's slot first
+	var slot_result := _try_auto_cast_from_slot(responding_player, trigger, context)
+	if slot_result.get("cast", false):
+		print("Response card auto-cast from player %d slot: %s" % [responding_player, slot_result.get("card", "")])
+
+	# Then try active player's slot (for triggers like endTurn/startTurn)
+	if responding_player != active:
+		slot_result = _try_auto_cast_from_slot(active, trigger, context)
+		if slot_result.get("cast", false):
+			print("Response card auto-cast from player %d slot: %s" % [active, slot_result.get("card", "")])
+
+	# Response Slot system replaces the old window system
+	# No window needed - either the slot triggers or nothing happens
+	return false
+
+
+func _get_responding_player_for_trigger(trigger: String, context: Dictionary) -> int:
+	"""Determine which player responds to a trigger."""
+	match trigger:
+		"beforeDamage", "afterDamage":
+			# The player whose champion is being damaged responds
+			var target_id: String = context.get("target", "")
+			if not target_id.is_empty():
+				var target := game_state.get_champion(target_id)
+				if target:
+					return target.owner_id
+			return 2 if game_state.active_player == 1 else 1
+
+		"onMove":
+			# Opponent of the moving champion can respond
+			var mover_id: String = context.get("champion", "")
+			if not mover_id.is_empty():
+				var mover := game_state.get_champion(mover_id)
+				if mover:
+					return 2 if mover.owner_id == 1 else 1
+			return 2 if game_state.active_player == 1 else 1
+
+		"onHeal", "onDraw", "onCast":
+			# Opponent responds
+			return 2 if game_state.active_player == 1 else 1
+
+		"endTurn", "startTurn":
+			# The player whose turn it is responds
+			return game_state.active_player
+
+		_:
+			return game_state.active_player
+
+
+func _try_auto_cast_from_slot(player_id: int, trigger: String, context: Dictionary) -> Dictionary:
+	"""Try to auto-cast a response card from the player's response slot.
+	Returns {"cast": true, "card": card_name, "result": effect_result} if successful."""
+	var slot_card := game_state.get_response_slot(player_id)
+	if slot_card.is_empty():
+		return {"cast": false}
+
+	var card_data := CardDatabase.get_card(slot_card)
+	if card_data.is_empty():
+		return {"cast": false}
+
+	# Verify the card's trigger matches
+	var card_trigger: String = card_data.get("trigger", "")
+	if card_trigger != trigger:
+		return {"cast": false}
+
+	# Check mana cost
+	var cost: int = card_data.get("cost", 0)
+	var mana := game_state.get_mana(player_id)
+	if mana < cost:
+		return {"cast": false}
+
+	# Check if the card's character requirement matches (if any)
+	var card_character: String = card_data.get("character", "")
+	if not card_character.is_empty():
+		if not _validate_character_response(player_id, card_character, trigger, context):
+			return {"cast": false}
+
+	# Find a valid caster for the response
+	var caster := _get_caster_for_response(player_id, card_character, context)
+	if caster == null:
+		return {"cast": false}
+
+	# Determine targets based on trigger context
+	var targets := _get_response_targets(trigger, context, card_data)
+
+	# Spend mana
+	game_state.spend_mana(player_id, cost)
+
+	# Process the card effects
+	var effect_result := effect_processor.process_card(slot_card, caster, targets)
+
+	# Move card from slot to discard
+	game_state.discard_response_slot(player_id)
+
+	# Emit signal for UI feedback
+	response_slot_triggered.emit(player_id, slot_card, trigger)
+
+	# Emit events for combat log
+	EventBus.card_played.emit(player_id, slot_card, targets)
+	if cost > 0:
+		EventBus.mana_spent.emit(player_id, cost, slot_card)
+
+	# Check for deaths caused by the response
+	for champ: ChampionState in game_state.get_all_champions():
+		if champ.is_dead() and not champ.death_processed:
+			if not BuffRegistry.check_cheat_death(champ):
+				_handle_champion_death(champ.unique_id, caster.unique_id)
+
+	return {"cast": true, "card": slot_card, "result": effect_result}
+
+
+func _validate_character_response(player_id: int, card_character: String, trigger: String, context: Dictionary) -> bool:
+	"""Validate that a character-specific response card can be played."""
+	# For damage triggers, the character must be the one being damaged
+	if trigger == "beforeDamage" or trigger == "afterDamage":
+		var target_id: String = context.get("target", "")
+		if target_id.is_empty():
+			return false
+		var target := game_state.get_champion(target_id)
+		if target == null:
+			return false
+		if target.champion_name != card_character:
+			return false
+		if not target.is_alive():
+			return false
+
+	return true
+
+
+func _get_caster_for_response(player_id: int, card_character: String, context: Dictionary) -> ChampionState:
+	"""Get a valid caster for a response card."""
+	# For character-specific cards, use that character
+	if not card_character.is_empty():
+		for champ: ChampionState in game_state.get_champions(player_id):
+			if champ.champion_name == card_character and champ.is_alive():
+				return champ
+		return null
+
+	# For generic responses, use any living champion
+	for champ: ChampionState in game_state.get_living_champions(player_id):
+		return champ
+
+	return null
+
+
+func _get_response_targets(trigger: String, context: Dictionary, card_data: Dictionary) -> Array:
+	"""Determine targets for a response card based on trigger context."""
+	var target_type: String = card_data.get("target", "none")
+	var targets: Array = []
+
+	match target_type.to_lower():
+		"enemy":
+			# For damage triggers, target the attacker
+			var attacker_id: String = context.get("attacker", "")
+			if not attacker_id.is_empty():
+				targets.append(attacker_id)
+		"self":
+			# For damage triggers, target is the damaged champion
+			var target_id: String = context.get("target", "")
+			if not target_id.is_empty():
+				targets.append(target_id)
+		_:
+			# No specific target needed
+			pass
+
+	return targets
 
 
 func _check_win_condition() -> void:
@@ -635,3 +900,53 @@ func undo_last_action() -> bool:
 func redo_action() -> bool:
 	"""Redo previously undone action."""
 	return action_system.redo_action(game_state)
+
+
+# === Player Input Handlers ===
+
+func _on_x_value_required(player_id: int, card_name: String, min_val: int, max_val: int) -> void:
+	"""Forward X value request to UI."""
+	x_value_required.emit(player_id, card_name, min_val, max_val)
+
+
+func _on_choice_required(player_id: int, options: Array, choose_count: int, context: Dictionary) -> void:
+	"""Forward choice request to UI."""
+	choice_required.emit(player_id, options, choose_count, context)
+
+
+func _on_position_required(player_id: int, valid_positions: Array, context: Dictionary) -> void:
+	"""Forward position selection request to UI."""
+	position_selection_required.emit(player_id, valid_positions, context)
+
+
+func complete_x_value_selection(value: int) -> Dictionary:
+	"""Complete X value selection from UI/AI."""
+	return effect_processor.complete_x_selection(value)
+
+
+func complete_choice_selection(choices: Array) -> Dictionary:
+	"""Complete choice selection from UI/AI."""
+	return effect_processor.complete_choice_selection(choices)
+
+
+func complete_position_selection(position: Vector2i) -> Dictionary:
+	"""Complete position selection from UI/AI."""
+	return effect_processor.complete_position_selection(position)
+
+
+func has_pending_input() -> bool:
+	"""Check if waiting for any player input."""
+	return effect_processor.has_pending_x_selection() or \
+		   effect_processor.has_pending_choice() or \
+		   effect_processor.has_pending_position_selection()
+
+
+func get_pending_input_type() -> String:
+	"""Get the type of pending input."""
+	if effect_processor.has_pending_x_selection():
+		return "x_value"
+	elif effect_processor.has_pending_choice():
+		return "choice"
+	elif effect_processor.has_pending_position_selection():
+		return "position"
+	return ""

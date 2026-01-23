@@ -99,13 +99,94 @@ const CHAMPION_TOKEN_SIZE := 52
 const MANA_GEM_SIZE := 20
 const HP_BAR_HEIGHT := 6
 
-# === FONT SIZES ===
-const FONT_CARD_NAME := 12
-const FONT_CARD_COST := 14
-const FONT_CARD_DESC := 9
-const FONT_CARD_TYPE := 8
+# === FONT SIZES (Enhanced for better hierarchy) ===
+const FONT_TITLE_LARGE := 18    # Main titles
+const FONT_TITLE := 14          # Section headers
+const FONT_SUBTITLE := 12       # Subsections
+const FONT_BODY := 10           # Normal text
+const FONT_SMALL := 9           # Helper text
+
+# Card-specific
+const FONT_CARD_NAME := 13      # Increased for readability
+const FONT_CARD_COST := 16      # Increased for visibility
+const FONT_CARD_DESC := 10      # Increased for readability
+const FONT_CARD_TYPE := 9       # Increased slightly
 const FONT_HP := 11
-const FONT_TITLE := 14
+const FONT_STAT_LABEL := 9
+const FONT_STAT_VALUE := 14
+
+# === SHADOW & DEPTH SETTINGS ===
+const SHADOW_COLOR := Color(0, 0, 0, 0.4)
+const SHADOW_SOFT := Color(0, 0, 0, 0.25)
+const SHADOW_HARD := Color(0, 0, 0, 0.6)
+
+# Shadow offsets for different UI elements
+const SHADOW_OFFSET_TINY := Vector2(1, 1)     # Text shadows
+const SHADOW_OFFSET_SMALL := Vector2(2, 2)    # Mana gems, small elements
+const SHADOW_OFFSET_MEDIUM := Vector2(3, 3)   # Cards, buttons
+const SHADOW_OFFSET_LARGE := Vector2(4, 4)    # Panels, portraits
+const SHADOW_OFFSET_XLARGE := Vector2(6, 6)   # HUD panels, floating elements
+
+# Glow settings
+const GLOW_SOFT := Color(1.0, 1.0, 1.0, 0.15)
+const GLOW_MEDIUM := Color(1.0, 1.0, 1.0, 0.25)
+const GLOW_STRONG := Color(1.0, 1.0, 1.0, 0.4)
+const GLOW_RADIUS_SMALL := 4.0
+const GLOW_RADIUS_MEDIUM := 6.0
+const GLOW_RADIUS_LARGE := 8.0
+
+# === GRADIENT DEFINITIONS ===
+const GRADIENT_PANEL_TOP := Color(0.14, 0.14, 0.18, 0.95)
+const GRADIENT_PANEL_BOTTOM := Color(0.08, 0.08, 0.12, 0.95)
+
+const GRADIENT_CARD_OVERLAY_TOP := Color(0.12, 0.12, 0.15, 0.9)
+const GRADIENT_CARD_OVERLAY_BOTTOM := Color(0.08, 0.08, 0.1, 0.85)
+
+const GRADIENT_MANA_FILLED_TOP := Color(0.5, 0.7, 1.0)
+const GRADIENT_MANA_FILLED_BOTTOM := Color(0.2, 0.4, 0.8)
+const GRADIENT_MANA_EMPTY_TOP := Color(0.25, 0.25, 0.3)
+const GRADIENT_MANA_EMPTY_BOTTOM := Color(0.15, 0.15, 0.18)
+
+const GRADIENT_HP_HIGH_TOP := Color(0.4, 0.9, 0.4)
+const GRADIENT_HP_HIGH_BOTTOM := Color(0.2, 0.7, 0.3)
+const GRADIENT_HP_MEDIUM_TOP := Color(1.0, 0.9, 0.3)
+const GRADIENT_HP_MEDIUM_BOTTOM := Color(0.8, 0.7, 0.15)
+const GRADIENT_HP_LOW_TOP := Color(1.0, 0.4, 0.3)
+const GRADIENT_HP_LOW_BOTTOM := Color(0.8, 0.2, 0.2)
+
+# === BEVEL & INSET EFFECTS ===
+const BEVEL_HIGHLIGHT := Color(1.0, 1.0, 1.0, 0.2)  # Top/left edge
+const BEVEL_SHADOW := Color(0, 0, 0, 0.3)           # Bottom/right edge
+const BEVEL_WIDTH := 1.5
+
+const INSET_HIGHLIGHT := Color(0, 0, 0, 0.25)       # Top/left (inverted)
+const INSET_SHADOW := Color(1.0, 1.0, 1.0, 0.1)     # Bottom/right (inverted)
+
+# === SPACING & MARGINS ===
+const SPACING_TINY := 2
+const SPACING_SMALL := 4
+const SPACING_MEDIUM := 8
+const SPACING_LARGE := 12
+const SPACING_XLARGE := 16
+
+const MARGIN_TINY := 2
+const MARGIN_SMALL := 4
+const MARGIN_MEDIUM := 8
+const MARGIN_LARGE := 12
+const MARGIN_XLARGE := 16
+
+const PADDING_CARD := 6         # Padding inside cards
+const PADDING_PANEL := 12       # Padding inside panels
+const PADDING_BUTTON := 8       # Padding inside buttons
+
+# === ANIMATION & EFFECTS ===
+const PULSE_SPEED := 2.0        # Speed of pulse animations
+const PULSE_MIN_ALPHA := 0.5    # Minimum alpha in pulse
+const PULSE_MAX_ALPHA := 1.0    # Maximum alpha in pulse
+
+const HOVER_SCALE := 1.02       # Scale factor on hover
+const HOVER_GLOW_ALPHA := 0.2   # Glow alpha on hover
+const HOVER_DURATION := 0.15    # Tween duration for hover
 
 # === CHAMPION SYMBOLS ===
 # Unicode symbols to represent each champion on cards
@@ -200,3 +281,54 @@ static func create_card_stylebox(card_type: String, is_playable: bool = true) ->
 	style.set_border_width_all(CARD_BORDER)
 	style.set_corner_radius_all(6)
 	return style
+
+
+# === DRAWING HELPER FUNCTIONS ===
+
+static func draw_vertical_gradient(control: Control, rect: Rect2, top_color: Color, bottom_color: Color) -> void:
+	"""Draw a vertical gradient rectangle using line drawing."""
+	var steps := int(rect.size.y)
+	for i in range(steps):
+		var t := float(i) / float(maxi(steps - 1, 1))
+		var color := top_color.lerp(bottom_color, t)
+		var y := rect.position.y + i
+		control.draw_line(Vector2(rect.position.x, y), Vector2(rect.position.x + rect.size.x, y), color, 1.0)
+
+
+static func draw_bevel(control: Control, rect: Rect2, width: float = BEVEL_WIDTH,
+					   highlight: Color = BEVEL_HIGHLIGHT, shadow: Color = BEVEL_SHADOW) -> void:
+	"""Draw beveled edges (3D raised effect)."""
+	# Top edge (highlight)
+	control.draw_line(rect.position, rect.position + Vector2(rect.size.x, 0), highlight, width)
+	# Left edge (highlight)
+	control.draw_line(rect.position, rect.position + Vector2(0, rect.size.y), highlight, width)
+	# Bottom edge (shadow)
+	control.draw_line(rect.position + Vector2(0, rect.size.y), rect.position + rect.size, shadow, width)
+	# Right edge (shadow)
+	control.draw_line(rect.position + Vector2(rect.size.x, 0), rect.position + rect.size, shadow, width)
+
+
+static func draw_inset(control: Control, rect: Rect2, width: float = BEVEL_WIDTH) -> void:
+	"""Draw inset edges (3D recessed effect)."""
+	draw_bevel(control, rect, width, INSET_HIGHLIGHT, INSET_SHADOW)
+
+
+static func draw_text_shadow(control: Control, font: Font, pos: Vector2, text: String,
+							 font_size: int, color: Color, shadow_offset: Vector2 = SHADOW_OFFSET_TINY,
+							 shadow_color: Color = Color(0, 0, 0, 0.6), alignment: int = HORIZONTAL_ALIGNMENT_LEFT,
+							 width: int = -1) -> void:
+	"""Draw text with a drop shadow for better readability."""
+	# Shadow
+	control.draw_string(font, pos + shadow_offset, text, alignment, width, font_size, shadow_color)
+	# Main text
+	control.draw_string(font, pos, text, alignment, width, font_size, color)
+
+
+static func get_hp_gradient_colors(pct: float) -> Array:
+	"""Get gradient colors for HP bar based on percentage. Returns [top_color, bottom_color]."""
+	if pct > 0.5:
+		return [GRADIENT_HP_HIGH_TOP, GRADIENT_HP_HIGH_BOTTOM]
+	elif pct > 0.25:
+		return [GRADIENT_HP_MEDIUM_TOP, GRADIENT_HP_MEDIUM_BOTTOM]
+	else:
+		return [GRADIENT_HP_LOW_TOP, GRADIENT_HP_LOW_BOTTOM]

@@ -4,13 +4,21 @@ class_name GameScene
 ## Connects board, UI, and game logic
 
 const BOARD_SCENE := preload("res://scenes/game/board/board.tscn")
+const BOARD_3D_SCENE := preload("res://scenes/game/board_3d/board_3d.tscn")
 const HAND_SCENE := preload("res://scenes/game/cards/hand.tscn")
 const HUD_SCENE := preload("res://scenes/game/game_hud.tscn")
 
+# 3D Mode toggle - set to false for 2D Classic mode (game_3d.tscn is used for 3D mode)
+var use_3d_board: bool = false
+
 # Scene references
-var board: GameBoard
+var board: GameBoard  # 2D board
+var board_3d: Board3D  # 3D board
+var board_3d_viewport: SubViewportContainer
+var board_3d_manager: Board3DManager
 var hand_ui: HandUI
 var hud: GameHUD
+var response_slot: ResponseSlot  # Player's response card slot
 
 # Game systems
 var game_controller: GameController
@@ -25,7 +33,8 @@ enum InputMode {
 	SELECT_CAST_TARGET,
 	SELECT_DIRECTION,
 	SELECT_POSITION,
-	IMMEDIATE_MOVE  # Player selecting where to move during response
+	IMMEDIATE_MOVE,  # Player selecting where to move during response
+	SELECT_DISCARD  # Player selecting cards to discard (e.g., From the Sky)
 }
 
 var input_mode: InputMode = InputMode.SELECT_CHAMPION
@@ -38,6 +47,20 @@ var ai_player1: AIController  # AI for player 1 in AI vs AI mode
 # Immediate movement state
 var _pending_immediate_moves: Array = []  # Champion IDs waiting for movement selection
 var _immediate_move_champion_id: String = ""  # Currently selecting move for this champion
+
+
+# Helper to get the active board (works with both 2D and 3D)
+func get_active_board():
+	"""Returns the active board instance (2D or 3D)."""
+	if use_3d_board and board_3d:
+		return board_3d
+	return board
+
+# Discard selection state (for From the Sky, etc.)
+var _discard_selection_active: bool = false
+var _discard_selected_cards: Array[String] = []
+var _discard_caster_id: String = ""
+var _discard_confirm_button: Button = null
 
 
 func _ready() -> void:
@@ -64,25 +87,46 @@ func _setup_scene() -> void:
 	const PANEL_WIDTH := 220
 	const TOP_BAR_HEIGHT := 160
 	const TURN_INFO_HEIGHT := 90
-	const BOARD_WIDTH := 688  # 10*64 tiles + 24*2 coord margins
+	const BOTTOM_BAR_HEIGHT := 180  # Hand UI height
+	const BOARD_SIZE := 688  # 10*64 tiles + 24*2 coord margins
+	const SCREEN_WIDTH := 1920
+	const SCREEN_HEIGHT := 1080
 
-	# Calculate centered board position
+	# Calculate available vertical space for board
+	var top_offset := TOP_BAR_HEIGHT + TURN_INFO_HEIGHT + MARGIN
+	var available_height := SCREEN_HEIGHT - top_offset - BOTTOM_BAR_HEIGHT - MARGIN
+
+	# Scale board to fit available height if needed
+	var board_scale := minf(1.0, available_height / float(BOARD_SIZE))
+
+	# Calculate centered board position horizontally
 	# Left panel ends at: MARGIN + PANEL_WIDTH = 230
 	# Right panel starts at: 1920 - MARGIN - PANEL_WIDTH = 1690
 	# Center area: 1460px wide
-	# Board X: 230 + (1460 - 688) / 2 = 616
-	# Board Y: Below top bar and turn info = 160 + 90 + margin
-	board = BOARD_SCENE.instantiate()
-	board.position = Vector2(616, TOP_BAR_HEIGHT + TURN_INFO_HEIGHT + MARGIN)
-	add_child(board)
+	var center_area_start := MARGIN + PANEL_WIDTH
+	var center_area_width := SCREEN_WIDTH - 2 * (MARGIN + PANEL_WIDTH)
+	var board_x := center_area_start + (center_area_width - BOARD_SIZE * board_scale) / 2
 
-	# Connect board signals
-	board.tile_clicked.connect(_on_tile_clicked)
-	board.champion_clicked.connect(_on_champion_clicked)
+	# Center board vertically in available space
+	var board_y := top_offset + (available_height - BOARD_SIZE * board_scale) / 2
 
-	# Connect AnimationController to board for Battle Chess animations
-	if AnimationController:
-		AnimationController.set_board(board)
+	if use_3d_board:
+		# Create 3D board with SubViewport for rendering
+		_setup_3d_board(board_x, board_y, BOARD_SIZE * board_scale)
+	else:
+		# Use traditional 2D board
+		board = BOARD_SCENE.instantiate()
+		board.position = Vector2(board_x, board_y)
+		board.scale = Vector2(board_scale, board_scale)
+		add_child(board)
+
+		# Connect board signals
+		board.tile_clicked.connect(_on_tile_clicked)
+		board.champion_clicked.connect(_on_champion_clicked)
+
+		# Connect AnimationController to board for Battle Chess animations
+		if AnimationController:
+			AnimationController.set_board(board)
 
 	# Create HUD (CanvasLayer for UI elements)
 	hud = HUD_SCENE.instantiate()
@@ -100,13 +144,100 @@ func _setup_scene() -> void:
 	# Connect hand signals
 	hand_ui.card_selected.connect(_on_card_selected)
 	hand_ui.card_deselected.connect(_on_card_deselected)
+	hand_ui.card_toggled.connect(_on_discard_card_toggled)
+
+	# Create response slot - positioned to the LEFT of the board, near the bottom
+	response_slot = ResponseSlot.new()
+	var slot_x := board_x - ResponseSlot.SLOT_WIDTH - 20  # Left of board with gap
+	var slot_y := SCREEN_HEIGHT - BOTTOM_BAR_HEIGHT - ResponseSlot.SLOT_HEIGHT - MARGIN  # Above bottom bar
+	response_slot.position = Vector2(slot_x, slot_y)
+	add_child(response_slot)
+
+	# Connect response slot signals
+	response_slot.slot_clicked.connect(_on_response_slot_clicked)
+	response_slot.card_removed.connect(_on_response_card_removed)
+
+
+func _setup_3d_board(board_x: float, board_y: float, board_size: float) -> void:
+	"""Set up the 3D Battle Chess board using SubViewport."""
+	print("Setting up 3D Battle Chess board...")
+
+	# Create SubViewportContainer to display 3D content in 2D scene
+	board_3d_viewport = SubViewportContainer.new()
+	board_3d_viewport.name = "Board3DViewport"
+	board_3d_viewport.position = Vector2(board_x, board_y)
+	board_3d_viewport.size = Vector2(board_size, board_size)
+	board_3d_viewport.stretch = true
+	add_child(board_3d_viewport)
+
+	# Create SubViewport
+	var viewport := SubViewport.new()
+	viewport.name = "SubViewport"
+	viewport.size = Vector2i(int(board_size), int(board_size))
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	viewport.transparent_bg = true
+	board_3d_viewport.add_child(viewport)
+
+	# Create 3D board inside viewport
+	board_3d = BOARD_3D_SCENE.instantiate()
+	viewport.add_child(board_3d)
+
+	# Wait a frame for board to initialize
+	await get_tree().process_frame
+
+	# Connect 3D board signals
+	if board_3d:
+		board_3d.tile_clicked.connect(_on_tile_clicked)
+		board_3d.champion_clicked.connect(_on_champion_clicked)
+		board_3d.tile_hovered.connect(_on_tile_hovered_3d)
+		board_3d.tile_unhovered.connect(_on_tile_unhovered_3d)
+		print("Board3D signals connected")
+
+	# Create Board3DManager to bridge EventBus
+	board_3d_manager = Board3DManager.new()
+	add_child(board_3d_manager)
+	board_3d_manager.set_board(board_3d)
+
+	print("3D Board setup complete!")
+
+
+func _on_tile_hovered_3d(grid_pos: Vector2i) -> void:
+	"""Handle 3D tile hover."""
+	if board_3d:
+		board_3d.set_highlight(grid_pos, Board3D.HighlightType.HOVER)
+
+
+func _on_tile_unhovered_3d(grid_pos: Vector2i) -> void:
+	"""Handle 3D tile unhover."""
+	if board_3d:
+		board_3d.set_highlight(grid_pos, Board3D.HighlightType.NONE)
 
 
 func _start_game() -> void:
 	"""Initialize and start a new game."""
-	# Default champion selection (will be replaced with selection screen)
-	var p1_champions: Array[String] = ["Brute", "Ranger"]
-	var p2_champions: Array[String] = ["Berserker", "Shaman"]
+	# Get champion selections from metadata (set by character select screen)
+	var p1_champions: Array[String] = []
+	var p2_champions: Array[String] = []
+
+	var p1_meta = get_meta("p1_champions", null)
+	var p2_meta = get_meta("p2_champions", null)
+
+	# Convert metadata arrays to typed arrays
+	if p1_meta != null and p1_meta is Array:
+		for name in p1_meta:
+			p1_champions.append(str(name))
+	else:
+		# Default fallback
+		p1_champions = ["Brute", "Ranger"]
+
+	if p2_meta != null and p2_meta is Array:
+		for name in p2_meta:
+			p2_champions.append(str(name))
+	else:
+		# Default fallback
+		p2_champions = ["Berserker", "Shaman"]
+
+	print("GameScene: Starting with P1 champions: %s, P2 champions: %s" % [p1_champions, p2_champions])
 
 	# Initialize game controller
 	game_controller = GameController.new()
@@ -120,11 +251,13 @@ func _start_game() -> void:
 	game_controller.response_window_closed.connect(_on_response_window_closed)
 	game_controller.champion_died.connect(_on_champion_died)
 	game_controller.game_ended.connect(_on_game_ended)
+	game_controller.response_slot_triggered.connect(_on_response_slot_triggered)
 
 	# Connect effect processor signals for immediate movements and combat text
 	game_controller.effect_processor.immediate_movement_required.connect(_on_immediate_movement_required)
 	game_controller.effect_processor.damage_dealt.connect(_on_damage_dealt)
 	game_controller.effect_processor.healing_done.connect(_on_healing_done)
+	game_controller.effect_processor.discard_selection_required.connect(_on_discard_selection_required)
 
 	# Initialize AI for player 2
 	ai_controller = AIController.new(game_controller, 2)
@@ -137,12 +270,39 @@ func _start_game() -> void:
 
 	# Initialize UI with game state
 	var state := game_controller.get_game_state()
-	board.initialize(state)
+
+	if use_3d_board and board_3d:
+		# Initialize 3D board
+		_initialize_3d_board(state)
+	else:
+		# Initialize 2D board
+		board.initialize(state)
+
 	hud.initialize(state)
 	hand_ui.setup(1)
+	response_slot.setup(1, state)
 
 	# Start the game
 	game_controller.start_game()
+
+
+func _initialize_3d_board(state: GameState) -> void:
+	"""Initialize the 3D board with terrain and champions."""
+	print("Initializing 3D board with game state...")
+
+	# Use the Board3D initialize method which sets up terrain, champions, and stores game state reference
+	board_3d.initialize(state)
+
+	# Log what was added
+	for player_id in [1, 2]:
+		for champion in state.get_champions(player_id):
+			print("  3D champion ready: %s at %s" % [champion.champion_name, champion.position])
+
+	# Initialize board manager for EventBus bridging
+	if board_3d_manager:
+		board_3d_manager.initialize(state)
+
+	print("3D board initialization complete")
 
 
 func _on_turn_started(player_id: int, round_number: int) -> void:
@@ -180,30 +340,52 @@ func _on_action_performed(action: Dictionary) -> void:
 	"""Handle action completion."""
 	var action_type: String = action.get("action", "")
 
-	match action_type:
-		"move":
-			var raw_path: Array = action.get("path", [])
-			if raw_path.size() > 0:
-				var typed_path: Array[Vector2i] = []
-				for pos in raw_path:
-					if pos is Vector2i:
-						typed_path.append(pos)
-				if typed_path.size() > 0:
-					board.animate_move(action.get("champion", ""), typed_path)
-		"attack":
-			board.animate_attack(action.get("attacker", ""), action.get("target", ""))
+	if use_3d_board and board_3d:
+		# 3D Board animations
+		match action_type:
+			"move":
+				var raw_path: Array = action.get("path", [])
+				if raw_path.size() > 0:
+					var typed_path: Array[Vector2i] = []
+					for pos in raw_path:
+						if pos is Vector2i:
+							typed_path.append(pos)
+					if typed_path.size() > 0:
+						await board_3d.animate_move(action.get("champion", ""), typed_path)
+			"attack":
+				await board_3d.animate_attack(action.get("attacker", ""), action.get("target", ""))
+	else:
+		# 2D Board animations
+		match action_type:
+			"move":
+				var raw_path: Array = action.get("path", [])
+				if raw_path.size() > 0:
+					var typed_path: Array[Vector2i] = []
+					for pos in raw_path:
+						if pos is Vector2i:
+							typed_path.append(pos)
+					if typed_path.size() > 0:
+						board.animate_move(action.get("champion", ""), typed_path)
+			"attack":
+				board.animate_attack(action.get("attacker", ""), action.get("target", ""))
 
 	# Update displays
 	await get_tree().create_timer(0.3).timeout
-	board.update_champion_positions()
-	board.update_champion_hp()
+	if use_3d_board and board_3d:
+		# 3D board updates positions automatically
+		pass
+	else:
+		board.update_champion_positions()
+		board.update_champion_hp()
 	_update_ui()
 
 
 func _on_champion_died(champion_id: String) -> void:
 	"""Handle champion death."""
 	hud.show_message("Champion defeated!")
-	board.update_champion_positions()
+	var active_board = get_active_board()
+	if active_board:
+		active_board.update_champion_positions()
 
 
 func _on_damage_dealt(attacker_id: String, target_id: String, amount: int) -> void:
@@ -211,9 +393,11 @@ func _on_damage_dealt(attacker_id: String, target_id: String, amount: int) -> vo
 	var state := game_controller.get_game_state()
 	var target := state.get_champion(target_id)
 	if target and amount > 0:
-		var screen_pos := board.get_champion_screen_position(target_id)
-		if screen_pos != Vector2.ZERO:
-			hud.show_damage_number(amount, screen_pos)
+		var active_board = get_active_board()
+		if active_board:
+			var screen_pos := active_board.get_champion_screen_position(target_id)
+			if screen_pos != Vector2.ZERO:
+				hud.show_damage_number(amount, screen_pos)
 
 
 func _on_healing_done(source_id: String, target_id: String, amount: int) -> void:
@@ -221,9 +405,11 @@ func _on_healing_done(source_id: String, target_id: String, amount: int) -> void
 	var state := game_controller.get_game_state()
 	var target := state.get_champion(target_id)
 	if target and amount > 0:
-		var screen_pos := board.get_champion_screen_position(target_id)
-		if screen_pos != Vector2.ZERO:
-			hud.show_heal_number(amount, screen_pos)
+		var active_board = get_active_board()
+		if active_board:
+			var screen_pos := active_board.get_champion_screen_position(target_id)
+			if screen_pos != Vector2.ZERO:
+				hud.show_heal_number(amount, screen_pos)
 
 
 func _on_game_ended(winner: int, reason: String) -> void:
@@ -249,6 +435,23 @@ func _on_response_window_opened(trigger: String, context: Dictionary) -> void:
 func _on_response_window_closed() -> void:
 	"""Handle response window closing."""
 	hud.hide_response_window()
+
+
+func _on_response_slot_triggered(player_id: int, card_name: String, trigger: String) -> void:
+	"""Handle response card auto-triggered from slot."""
+	var player_name := "Your" if player_id == 1 else "Enemy's"
+	hud.show_message("%s %s triggered! (%s)" % [player_name, card_name, trigger], 2.5)
+
+	# Update the response slot UI (card is now gone)
+	if response_slot and player_id == 1:
+		response_slot.update_slot()
+
+	# Update displays
+	var active_board = get_active_board()
+	if active_board:
+		active_board.update_champion_hp()
+		active_board.update_champion_positions()
+	_update_ui()
 
 
 # === Input Handling ===
@@ -327,17 +530,13 @@ func _on_card_selected(card_name: String) -> void:
 
 	var card_data := CardDatabase.get_card(card_name)
 	var card_type: String = str(card_data.get("type", ""))
+	print("  Card type: '%s'" % card_type)
 
-	# Check if this is a response card during a response window
+	# Response cards go to the response slot (can be done any time, not just on your turn)
 	if card_type == "Response":
-		if not game_controller.response_stack.is_open():
-			print("Game: Response card but no response window open")
-			return
-		if game_controller.response_stack.get_priority_player() != 1:
-			print("Game: Response card but player doesn't have priority")
-			return
-		# Handle response card - check if it needs a target
-		_handle_response_card_selection(card_name, card_data)
+		print("  Detected Response card, placing in slot...")
+		_place_card_in_response_slot(card_name)
+		hand_ui.clear_selection()  # Clear the visual selection
 		return
 
 	# For non-response cards, must be player's turn
@@ -352,20 +551,25 @@ func _on_card_selected(card_name: String) -> void:
 	var target_type: String = str(card_data.get("target", "none"))
 	print("Game: Card target type: '%s'" % target_type)
 
-	board.clear_highlights()
+	var active_board = get_active_board()
+	if active_board:
+		active_board.clear_highlights()
 
 	match target_type.to_lower():
 		"enemy":
 			var targets := _get_enemy_positions()
-			board.show_attack_highlights(targets)
+			if active_board:
+				active_board.show_attack_highlights(targets)
 			input_mode = InputMode.SELECT_CAST_TARGET
 		"ally", "friendly":
 			var targets := _get_ally_positions()
-			board.show_cast_highlights(targets)
+			if active_board:
+				active_board.show_cast_highlights(targets)
 			input_mode = InputMode.SELECT_CAST_TARGET
 		"allyorself":
 			var targets := _get_ally_positions()
-			board.show_cast_highlights(targets)
+			if active_board:
+				active_board.show_cast_highlights(targets)
 			input_mode = InputMode.SELECT_CAST_TARGET
 		"none":
 			# No target needed - cast immediately
@@ -451,13 +655,17 @@ func _on_card_deselected() -> void:
 	selected_card = ""
 	if input_mode == InputMode.SELECT_CAST_TARGET:
 		input_mode = InputMode.SELECT_CHAMPION
-	board.clear_highlights()
+	var active_board = get_active_board()
+	if active_board:
+		active_board.clear_highlights()
 
 
 func _select_champion(champion_id: String) -> void:
 	"""Select a champion and show available actions."""
 	selected_champion_id = champion_id
-	board.select_champion(champion_id)
+	var active_board = get_active_board()
+	if active_board:
+		active_board.select_champion(champion_id)
 
 	# Highlight the portrait in the HUD
 	hud.set_selected_champion(champion_id)
@@ -470,11 +678,13 @@ func _select_champion(champion_id: String) -> void:
 
 	# Show valid moves (green)
 	var valid_moves := game_controller.get_valid_moves(champion_id)
-	board.show_move_highlights(valid_moves)
+	if active_board:
+		active_board.show_move_highlights(valid_moves)
 
 	# Show attack range (yellow) - all tiles in range
 	var range_tiles := _get_range_tiles(champion, state)
-	board.show_range_highlights(range_tiles)
+	if active_board:
+		active_board.show_range_highlights(range_tiles)
 
 	# Show valid attack targets (red) - enemies in range
 	var valid_targets := game_controller.get_valid_attack_targets(champion_id)
@@ -483,7 +693,8 @@ func _select_champion(champion_id: String) -> void:
 		var target := state.get_champion(target_id)
 		if target:
 			target_positions.append(target.position)
-	board.show_attack_highlights(target_positions)
+	if active_board:
+		active_board.show_attack_highlights(target_positions)
 
 	input_mode = InputMode.SELECT_MOVE
 
@@ -621,9 +832,11 @@ func _try_cast_no_target() -> void:
 
 func _update_after_action() -> void:
 	"""Update UI after an action."""
-	board.update_champion_positions()
-	board.update_champion_hp()
-	board.update_terrain()  # Update terrain for temporary pits, etc.
+	var active_board = get_active_board()
+	if active_board:
+		active_board.update_champion_positions()
+		active_board.update_champion_hp()
+		active_board.update_terrain()  # Update terrain for temporary pits, etc.
 	_update_ui()
 
 	# Keep buttons enabled if it's still player's turn
@@ -640,7 +853,9 @@ func _reset_input_state() -> void:
 	selected_champion_id = ""
 	selected_card = ""
 	input_mode = InputMode.SELECT_CHAMPION
-	board.clear_highlights()
+	var active_board = get_active_board()
+	if active_board:
+		active_board.clear_highlights()
 	hand_ui.clear_selection()
 	hud.clear_selection()  # Clear portrait highlighting
 
@@ -660,8 +875,10 @@ func _on_undo_pressed() -> void:
 	"""Handle undo button."""
 	if is_player_turn:
 		if game_controller.undo_last_action():
-			board.update_champion_positions()
-			board.update_champion_hp()
+			var active_board = get_active_board()
+			if active_board:
+				active_board.update_champion_positions()
+				active_board.update_champion_hp()
 			_update_ui()
 
 
@@ -680,9 +897,11 @@ func _on_pass_priority_pressed() -> void:
 				for result: Dictionary in results:
 					print("Response resolved: %s" % result)
 				_update_ui()
-				board.update_champion_positions()
-				board.update_champion_hp()
-				board.update_terrain()  # Update for temporary pits
+				var active_board = get_active_board()
+				if active_board:
+					active_board.update_champion_positions()
+					active_board.update_champion_hp()
+					active_board.update_terrain()  # Update for temporary pits
 			else:
 				# Priority passed to opponent - AI will respond
 				_handle_ai_response()
@@ -706,9 +925,11 @@ func _handle_ai_response() -> void:
 		for result: Dictionary in results:
 			print("Response resolved: %s" % result)
 		_update_ui()
-		board.update_champion_positions()
-		board.update_champion_hp()
-		board.update_terrain()  # Update for temporary pits
+		var active_board = get_active_board()
+		if active_board:
+			active_board.update_champion_positions()
+			active_board.update_champion_hp()
+			active_board.update_terrain()  # Update for temporary pits
 	else:
 		# Priority back to player
 		hud.show_response_window(
@@ -738,6 +959,10 @@ func _update_ui() -> void:
 	# Update discard pile for player 1
 	var discard := state.get_discard(1)
 	hand_ui.update_discard(discard)
+
+	# Update response slot
+	if response_slot:
+		response_slot.update_slot()
 
 
 func _get_enemy_positions() -> Array[Vector2i]:
@@ -825,7 +1050,9 @@ func _show_direction_highlights() -> void:
 		if game_controller.get_game_state().is_valid_position(pos):
 			directions.append(pos)
 
-	board.show_cast_highlights(directions)
+	var active_board = get_active_board()
+	if active_board:
+		active_board.show_cast_highlights(directions)
 	hud.show_message("Click a direction (up/down/left/right)", 3.0)
 
 
@@ -842,7 +1069,9 @@ func _show_position_highlights() -> void:
 			if state.is_walkable(pos):
 				valid_positions.append(pos)
 
-	board.show_cast_highlights(valid_positions)
+	var active_board = get_active_board()
+	if active_board:
+		active_board.show_cast_highlights(valid_positions)
 	hud.show_message("Click a tile to target", 3.0)
 
 
@@ -970,13 +1199,15 @@ func _on_immediate_movement_required(champion_ids: Array, movement_bonus: int) -
 
 func _start_immediate_movement_for_next_champion() -> void:
 	"""Start immediate movement UI for the next pending champion."""
+	var active_board = get_active_board()
 	if _pending_immediate_moves.is_empty():
 		# All immediate movements done - continue with response resolution
 		print("All immediate movements completed")
 		_immediate_move_champion_id = ""
 		input_mode = InputMode.SELECT_CHAMPION
-		board.clear_highlights()
-		board.update_champion_positions()
+		if active_board:
+			active_board.clear_highlights()
+			active_board.update_champion_positions()
 		_update_ui()
 		return
 
@@ -997,9 +1228,10 @@ func _start_immediate_movement_for_next_champion() -> void:
 	var pathfinder := Pathfinder.new(state)
 	var valid_moves := pathfinder.get_reachable_tiles(champion)
 
-	board.clear_highlights()
-	board.select_champion(_immediate_move_champion_id)
-	board.show_move_highlights(valid_moves)
+	if active_board:
+		active_board.clear_highlights()
+		active_board.select_champion(_immediate_move_champion_id)
+		active_board.show_move_highlights(valid_moves)
 
 	hud.show_message("Move %s (immediate)" % champion.champion_name, 5.0)
 
@@ -1033,11 +1265,225 @@ func _try_immediate_move(position: Vector2i) -> void:
 
 	# Animate the move
 	var path: Array[Vector2i] = [position]
-	board.animate_move(_immediate_move_champion_id, path)
+	var active_board = get_active_board()
+	if active_board:
+		active_board.animate_move(_immediate_move_champion_id, path)
 
 	# Update board
 	await get_tree().create_timer(0.3).timeout
-	board.update_champion_positions()
+	if active_board:
+		active_board.update_champion_positions()
 
 	# Move to next champion or finish
 	_start_immediate_movement_for_next_champion()
+
+
+# === Discard Selection Handling (From the Sky, etc.) ===
+
+func _on_discard_selection_required(player_id: int, caster_id: String, damage_per_card: int) -> void:
+	"""Handle request to select cards to discard."""
+	print("Discard selection required for player %d (caster: %s, %d damage per card)" % [player_id, caster_id, damage_per_card])
+
+	if player_id != 1:
+		# AI handles its own discard selection
+		_ai_handle_discard_selection(caster_id, damage_per_card)
+		return
+
+	# Set up discard selection mode
+	_discard_selection_active = true
+	_discard_selected_cards = []
+	_discard_caster_id = caster_id
+	input_mode = InputMode.SELECT_DISCARD
+
+	# Create confirm button
+	_create_discard_confirm_button()
+
+	# Update hand to show ALL cards as selectable (multi-select mode)
+	hand_ui.set_multi_select_mode(true)
+
+	# Refresh the hand display so all cards appear playable
+	var state := game_controller.get_game_state()
+	var hand := state.get_hand(1)
+	var mana := state.get_mana(1)
+	hand_ui.update_hand(hand, mana)  # This will now mark all cards playable due to multi_select_mode
+
+	hud.show_message("Select cards to discard (click Confirm when done)", 10.0)
+
+
+func _create_discard_confirm_button() -> void:
+	"""Create the confirm button for discard selection."""
+	if _discard_confirm_button != null:
+		_discard_confirm_button.queue_free()
+
+	_discard_confirm_button = Button.new()
+	_discard_confirm_button.text = "Confirm Discard (0 cards)"
+	_discard_confirm_button.custom_minimum_size = Vector2(200, 40)
+
+	# Position at bottom center
+	_discard_confirm_button.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	_discard_confirm_button.offset_left = -100
+	_discard_confirm_button.offset_right = 100
+	_discard_confirm_button.offset_top = -120
+	_discard_confirm_button.offset_bottom = -80
+
+	# Style the button
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.2, 0.5, 0.3)
+	style.set_border_width_all(2)
+	style.border_color = Color(0.3, 0.7, 0.4)
+	style.set_corner_radius_all(6)
+	_discard_confirm_button.add_theme_stylebox_override("normal", style)
+
+	var hover_style := StyleBoxFlat.new()
+	hover_style.bg_color = Color(0.25, 0.6, 0.35)
+	hover_style.set_border_width_all(2)
+	hover_style.border_color = Color(0.4, 0.8, 0.5)
+	hover_style.set_corner_radius_all(6)
+	_discard_confirm_button.add_theme_stylebox_override("hover", hover_style)
+
+	_discard_confirm_button.pressed.connect(_on_discard_confirm_pressed)
+
+	hud.add_child(_discard_confirm_button)
+
+
+func _on_discard_card_toggled(card_name: String, selected: bool) -> void:
+	"""Handle toggling a card for discard selection."""
+	if not _discard_selection_active:
+		return
+
+	if selected:
+		if card_name not in _discard_selected_cards:
+			_discard_selected_cards.append(card_name)
+	else:
+		_discard_selected_cards.erase(card_name)
+
+	# Update button text
+	if _discard_confirm_button:
+		var damage := _discard_selected_cards.size() * 2
+		_discard_confirm_button.text = "Confirm Discard (%d cards = %d damage)" % [_discard_selected_cards.size(), damage]
+
+
+func _on_discard_confirm_pressed() -> void:
+	"""Handle confirming discard selection."""
+	print("Confirming discard of %d cards: %s" % [_discard_selected_cards.size(), _discard_selected_cards])
+
+	# Complete the effect
+	var result := game_controller.effect_processor.complete_discard_selection(_discard_selected_cards)
+	print("Discard result: %s" % result)
+
+	# Clean up UI
+	_cleanup_discard_selection()
+
+	# Check for deaths and update UI
+	_update_after_action()
+
+
+func _cleanup_discard_selection() -> void:
+	"""Clean up discard selection state and UI."""
+	_discard_selection_active = false
+	_discard_selected_cards = []
+	_discard_caster_id = ""
+	input_mode = InputMode.SELECT_CHAMPION
+
+	if _discard_confirm_button:
+		_discard_confirm_button.queue_free()
+		_discard_confirm_button = null
+
+	hand_ui.set_multi_select_mode(false)
+	hand_ui.clear_selection()
+
+
+func _ai_handle_discard_selection(caster_id: String, damage_per_card: int) -> void:
+	"""AI decides which cards to discard."""
+	var state := game_controller.get_game_state()
+	var caster := state.get_champion(caster_id)
+	if caster == null:
+		return
+
+	var hand := state.get_hand(caster.owner_id)
+
+	# AI strategy: discard cards for dead champions first, then lowest cost cards
+	# For now, simple strategy: discard up to 3 cards if we have enemies to hit
+	var opp_id := 1 if caster.owner_id == 2 else 2
+	var living_enemies := state.get_living_champions(opp_id)
+
+	if living_enemies.is_empty():
+		# No enemies, don't discard
+		game_controller.effect_processor.complete_discard_selection([])
+		return
+
+	# Discard up to half the hand (simple strategy)
+	var to_discard: Array[String] = []
+	var max_discard := mini(hand.size(), 3)
+
+	for i in range(max_discard):
+		if i < hand.size():
+			to_discard.append(hand[i])
+
+	game_controller.effect_processor.complete_discard_selection(to_discard)
+	_update_after_action()
+
+
+# === Response Slot Handling ===
+
+func _on_response_slot_clicked() -> void:
+	"""Handle clicking the empty response slot - show hint."""
+	hud.show_message("Click a Response card to place it here", 2.0)
+
+
+func _on_response_card_removed(card_name: String) -> void:
+	"""Handle removing a card from the response slot."""
+	var state := game_controller.get_game_state()
+	var returned := state.clear_response_slot(1)
+	if not returned.is_empty():
+		hud.show_message("Returned " + returned + " to hand", 1.5)
+		_update_ui()
+		response_slot.update_slot()
+
+
+func _place_card_in_response_slot(card_name: String) -> void:
+	"""Place a response card in the response slot."""
+	print("_place_card_in_response_slot called with: %s" % card_name)
+
+	if game_controller == null:
+		print("  ERROR: game_controller is null!")
+		return
+
+	var state := game_controller.get_game_state()
+	if state == null:
+		print("  ERROR: game_state is null!")
+		return
+
+	# Check if it's actually a response card
+	var card_data := CardDatabase.get_card(card_name)
+	print("  Card data: %s" % card_data)
+	if card_data.get("type", "") != "Response":
+		hud.show_message("Only Response cards can be placed in the slot", 1.5)
+		print("  Card is not a Response type")
+		return
+
+	# Check if card is in hand
+	var hand := state.get_hand(1)
+	print("  Hand contents: %s" % hand)
+	if card_name not in hand:
+		hud.show_message("Card not in hand", 1.5)
+		print("  Card not found in hand!")
+		return
+
+	# Place the card in the slot
+	print("  Attempting to set response slot...")
+	if state.set_response_slot(1, card_name):
+		var trigger: String = card_data.get("trigger", "")
+		hud.show_message("Response ready: " + card_name + " (triggers on " + trigger + ")", 2.0)
+		print("  SUCCESS: Card placed in slot")
+		_update_ui()
+		response_slot.update_slot()
+	else:
+		hud.show_message("Failed to place card in slot", 1.5)
+		print("  FAILED: set_response_slot returned false")
+
+
+func _update_response_slot() -> void:
+	"""Update the response slot display."""
+	if response_slot:
+		response_slot.update_slot()

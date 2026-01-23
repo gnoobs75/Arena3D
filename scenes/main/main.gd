@@ -5,6 +5,7 @@ extends Node
 var status_label: Label = null
 var ai_test_running: bool = false
 var splash_screen: SplashScreen = null
+var character_select: CharacterSelect = null
 var database_ready: bool = false
 
 
@@ -103,45 +104,86 @@ func _on_database_loaded() -> void:
 
 
 func _show_splash_screen() -> void:
-	"""Show the splash screen with Enter Arena button."""
+	"""Show the splash screen with mode selection."""
 	# Hide the loading UI
-	var ui = get_node_or_null("UI")
+	var ui: Node = get_node_or_null("UI")
 	if ui:
 		ui.visible = false
 
 	# Load and add splash screen
-	var splash_scene := preload("res://scenes/main/splash_screen.tscn")
+	var splash_scene: PackedScene = preload("res://scenes/main/splash_screen.tscn")
 	splash_screen = splash_scene.instantiate()
-	splash_screen.enter_game_pressed.connect(_on_enter_game_pressed)
+	splash_screen.mode_selected.connect(_on_mode_selected)
 	add_child(splash_screen)
 	print("Main: Splash screen displayed")
 
 
-func _on_enter_game_pressed() -> void:
-	"""Handle Enter Arena button press."""
-	print("Main: Enter Arena pressed!")
+func _on_mode_selected(use_3d: bool) -> void:
+	"""Handle mode selection from splash screen."""
+	print("Main: Mode selected - 3D: %s" % use_3d)
 
 	# Remove splash screen
 	if splash_screen and is_instance_valid(splash_screen):
 		splash_screen.queue_free()
 		splash_screen = null
 
-	# Start the game
-	_start_game()
+	# Show character selection screen
+	_show_character_select(use_3d)
 
 
-func _start_game() -> void:
+func _show_character_select(use_3d: bool) -> void:
+	"""Show the character selection screen."""
+	print("Main: Showing character select screen...")
+	var char_select_scene: PackedScene = preload("res://scenes/main/character_select.tscn")
+	character_select = char_select_scene.instantiate()
+	character_select.use_3d_mode = use_3d
+	character_select.selection_complete.connect(_on_selection_complete)
+	add_child(character_select)
+	print("Main: Character select displayed")
+
+
+func _on_selection_complete(p1_champions: Array, p2_champions: Array, use_3d: bool) -> void:
+	"""Handle champion selection complete - start the game."""
+	print("Main: Selection complete - P1: %s, P2: %s, 3D: %s" % [p1_champions, p2_champions, use_3d])
+
+	# Remove character select
+	if character_select and is_instance_valid(character_select):
+		character_select.queue_free()
+		character_select = null
+
+	# Start game with selected champions
+	_start_game_with_champions(p1_champions, p2_champions, use_3d)
+
+
+func _start_game(use_3d: bool = false) -> void:
+	"""Start game with default champions (legacy, used by F10 AI test)."""
+	_start_game_with_champions(["Brute", "Ranger"], ["Berserker", "Shaman"], use_3d)
+
+
+func _start_game_with_champions(p1_champions: Array, p2_champions: Array, use_3d: bool = false) -> void:
+	"""Start the game with selected champions."""
 	# Hide the loading UI
-	var ui = get_node_or_null("UI")
+	var ui: Node = get_node_or_null("UI")
 	if ui:
 		ui.visible = false
 
-	# Load and add game scene
-	print("Main: Loading game scene...")
-	var game_scene := preload("res://scenes/game/game.tscn")
-	var game := game_scene.instantiate()
-	add_child(game)
-	print("Main: Game scene added")
+	# Load and add game scene based on mode
+	if use_3d:
+		print("Main: Loading 3D game scene...")
+		var game_scene: PackedScene = preload("res://scenes/game/game_3d.tscn")
+		var game: Node = game_scene.instantiate()
+		game.set_meta("p1_champions", p1_champions)
+		game.set_meta("p2_champions", p2_champions)
+		add_child(game)
+		print("Main: 3D Game scene added with champions P1:%s P2:%s" % [p1_champions, p2_champions])
+	else:
+		print("Main: Loading 2D game scene...")
+		var game_scene: PackedScene = preload("res://scenes/game/game.tscn")
+		var game: Node = game_scene.instantiate()
+		game.set_meta("p1_champions", p1_champions)
+		game.set_meta("p2_champions", p2_champions)
+		add_child(game)
+		print("Main: 2D Game scene added with champions P1:%s P2:%s" % [p1_champions, p2_champions])
 
 
 func _on_database_load_failed(error: String) -> void:

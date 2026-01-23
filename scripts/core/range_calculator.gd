@@ -40,6 +40,10 @@ func can_attack(attacker: ChampionState, target: ChampionState, state: GameState
 	if attacker.owner_id == target.owner_id:
 		return false
 
+	# Check for unlimited range buff (Super Charged)
+	if attacker.has_buff("unlimitedRange"):
+		return true  # Can attack any valid target regardless of distance
+
 	var distance := _calculate_attack_distance(attacker, target, state)
 	return distance >= 0 and distance <= attacker.current_range
 
