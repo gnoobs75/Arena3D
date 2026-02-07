@@ -23,6 +23,7 @@ var is_face_down: bool = false
 var is_selected: bool = false  # For multi-select mode
 var original_position: Vector2 = Vector2.ZERO
 var character_texture: Texture2D = null
+var _playable_glow_time: float = 0.0
 
 # Deferred setup data
 var _pending_setup: bool = false
@@ -45,6 +46,12 @@ func _ready() -> void:
 	if _pending_setup:
 		_do_setup(_pending_card_name, _pending_playable, _pending_face_down)
 		_pending_setup = false
+
+
+func _process(delta: float) -> void:
+	if is_playable and not is_hovered and not is_face_down:
+		_playable_glow_time += delta * 2.5
+		queue_redraw()
 
 
 func setup(card_name_: String, playable: bool = true, face_down: bool = false) -> void:
@@ -372,6 +379,11 @@ func _draw_card_front() -> void:
 			draw_rect(Rect2(-i, -i, w + i * 2, h + i * 2), Color(1.0, 0.95, 0.6, glow_alpha), false, 2.0)
 		draw_rect(Rect2(0, 0, w, h), Color(1, 1, 0.7, 0.15))
 		draw_rect(Rect2(0, 0, w, h), Color(1, 1, 0.5, 0.9), false, 2.0)
+	elif is_playable and not is_hovered and not is_selected and not is_face_down:
+		# Subtle breathing border glow on playable cards
+		var pulse := (sin(_playable_glow_time) + 1.0) * 0.5  # 0 to 1
+		var glow_alpha := 0.1 + pulse * 0.15
+		draw_rect(Rect2(0, 0, w, h), Color(0.8, 0.9, 1.0, glow_alpha), false, 1.5)
 
 
 func _draw_wrapped_text(text: String, rect: Rect2, font_size: int) -> void:
@@ -418,19 +430,38 @@ func _draw_placeholder() -> void:
 	draw_string(font, Vector2(size.x / 2 - 10, size.y / 2), "?", HORIZONTAL_ALIGNMENT_CENTER, -1, 32, Color(0.5, 0.5, 0.5))
 
 
+var _hover_tween: Tween
+
 func _on_mouse_entered() -> void:
 	is_hovered = true
 	original_position = position
-	position.y -= HOVER_LIFT
 	z_index = 10
+
+	# Smooth hover lift with scale
+	if _hover_tween and _hover_tween.is_valid():
+		_hover_tween.kill()
+	pivot_offset = size / 2
+	_hover_tween = create_tween()
+	_hover_tween.set_parallel(true)
+	_hover_tween.tween_property(self, "position:y", original_position.y - HOVER_LIFT, 0.15).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+	_hover_tween.tween_property(self, "scale", Vector2(HOVER_SCALE, HOVER_SCALE), 0.12).set_ease(Tween.EASE_OUT)
+
 	queue_redraw()
 	card_hovered.emit(card_name)
 
 
 func _on_mouse_exited() -> void:
 	is_hovered = false
-	position = original_position
 	z_index = 0
+
+	# Smooth return
+	if _hover_tween and _hover_tween.is_valid():
+		_hover_tween.kill()
+	_hover_tween = create_tween()
+	_hover_tween.set_parallel(true)
+	_hover_tween.tween_property(self, "position", original_position, 0.12).set_ease(Tween.EASE_IN_OUT)
+	_hover_tween.tween_property(self, "scale", Vector2.ONE, 0.12).set_ease(Tween.EASE_IN_OUT)
+
 	queue_redraw()
 	card_unhovered.emit(card_name)
 

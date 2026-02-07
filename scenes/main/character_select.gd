@@ -39,6 +39,7 @@ var hovered_champion: String = ""
 func _ready() -> void:
 	_build_ui()
 	_update_phase_display()
+	_play_entrance_animations()
 
 
 func _build_ui() -> void:
@@ -573,16 +574,71 @@ func _do_ai_pick() -> void:
 
 
 func _show_fight_button() -> void:
-	"""Show the FIGHT button with animation."""
+	"""Show the FIGHT button with dramatic entrance."""
 	fight_button.visible = true
 	fight_button.modulate.a = 0
+	fight_button.pivot_offset = fight_button.size / 2
+	fight_button.scale = Vector2(0.3, 0.3)
 	var tween := create_tween()
 	tween.tween_property(fight_button, "modulate:a", 1.0, 0.3)
+	tween.parallel().tween_property(fight_button, "scale", Vector2(1.05, 1.05), 0.35).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+	tween.tween_property(fight_button, "scale", Vector2.ONE, 0.15)
+	# Start pulsing
+	tween.tween_callback(_start_fight_pulse)
+
+	# VS label flare
+	if vs_label:
+		var vs_tween := create_tween()
+		vs_tween.tween_property(vs_label, "scale", Vector2(1.3, 1.3), 0.15).set_ease(Tween.EASE_OUT)
+		vs_tween.tween_property(vs_label, "scale", Vector2.ONE, 0.2)
+
+
+func _start_fight_pulse() -> void:
+	"""Subtle pulse on FIGHT button to draw attention."""
+	var tween := create_tween()
+	tween.set_loops()
+	fight_button.pivot_offset = fight_button.size / 2
+	tween.tween_property(fight_button, "scale", Vector2(1.04, 1.04), 0.6).set_ease(Tween.EASE_IN_OUT).set_trans(Tween.TRANS_SINE)
+	tween.tween_property(fight_button, "scale", Vector2(0.98, 0.98), 0.6).set_ease(Tween.EASE_IN_OUT).set_trans(Tween.TRANS_SINE)
 
 
 func _on_fight_pressed() -> void:
-	"""Handle FIGHT button press."""
+	"""Handle FIGHT button press with transition."""
+	if UIAnimator:
+		await UIAnimator.transition_fade_out(0.3)
 	selection_complete.emit(p1_selections, p2_selections, use_3d_mode)
+
+
+func _play_entrance_animations() -> void:
+	"""Staggered grid reveal and panel entrance."""
+	# Fade in from screen transition
+	if UIAnimator:
+		UIAnimator.transition_fade_in(0.4)
+
+	# Staggered card reveal
+	var delay := 0.0
+	for i in range(CHAMPIONS.size()):
+		var champ_name: String = CHAMPIONS[i]
+		var card: Control = champion_cards.get(champ_name)
+		if card == null:
+			continue
+		card.modulate.a = 0.0
+		card.pivot_offset = card.size / 2
+		card.scale = Vector2(0.7, 0.7)
+		var tween := create_tween()
+		tween.tween_interval(0.15 + delay)
+		tween.tween_property(card, "modulate:a", 1.0, 0.25).set_ease(Tween.EASE_OUT)
+		tween.parallel().tween_property(card, "scale", Vector2.ONE, 0.3).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+		delay += 0.04
+
+	# Pick slots fade in
+	var all_slots := p1_pick_slots + p2_pick_slots
+	for i in range(all_slots.size()):
+		var slot: Control = all_slots[i]
+		slot.modulate.a = 0.0
+		var tween := create_tween()
+		tween.tween_interval(0.5 + i * 0.08)
+		tween.tween_property(slot, "modulate:a", 1.0, 0.3)
 
 
 # === HELPER FUNCTIONS ===
@@ -626,7 +682,7 @@ func _get_available_champions() -> Array[String]:
 
 
 func _update_pick_slot(player_id: int, slot_index: int, champion_name: String) -> void:
-	"""Update a pick slot with the selected champion portrait."""
+	"""Update a pick slot with the selected champion portrait and animate it."""
 	var slots := p1_pick_slots if player_id == 1 else p2_pick_slots
 	if slot_index >= slots.size():
 		return
@@ -638,7 +694,7 @@ func _update_pick_slot(player_id: int, slot_index: int, champion_name: String) -
 	if question:
 		question.visible = false
 
-	# Show portrait
+	# Show portrait with slam-in animation
 	var portrait: TextureRect = slot.get_node_or_null("Portrait")
 	if portrait:
 		var tex_path := "res://assets/art/characters/%s.png" % champion_name
@@ -646,6 +702,15 @@ func _update_pick_slot(player_id: int, slot_index: int, champion_name: String) -
 		if texture:
 			portrait.texture = texture
 			portrait.visible = true
+			portrait.modulate.a = 0.0
+
+			# Scale pop + fade in
+			slot.pivot_offset = slot.size / 2
+			slot.scale = Vector2(1.2, 1.2)
+			var tween := create_tween()
+			tween.tween_property(portrait, "modulate:a", 1.0, 0.15)
+			tween.parallel().tween_property(slot, "scale", Vector2(1.08, 1.08), 0.1).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+			tween.tween_property(slot, "scale", Vector2.ONE, 0.15).set_ease(Tween.EASE_IN_OUT)
 
 
 func _update_phase_display() -> void:

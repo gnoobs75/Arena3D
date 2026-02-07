@@ -932,6 +932,8 @@
     "image": "Pursuit.png",
     "animatedImage": "Pursuit.gif",
     "target": "self",
+    "hasXCost": true,
+    "xSource": "hp",
     "effect": [
       {"type": "statMod", "stat": "movementSpeed", "value": "X", "duration": "thisTurn"},
       {"type": "damage", "value": "X", "target": "self"}
@@ -944,15 +946,15 @@
     "character": "Barbarian",
     "name": "Blood Shield",
     "Number in Deck": 2,
-    "type": "Action",
-    "description": "The Barbarian cannot be the target of any spell this turn. Cast at the start of any turn.",
+    "type": "Response",
+    "description": "Negate the next spell cast on the Barbarian.",
     "cost": 0,
     "image": "BloodShield.png",
     "target": "self",
     "effect": [
-      {"type": "buff", "name": "untouchable", "value": true, "duration": "thisTurn"}
+      {"type": "buff", "name": "negateSpell", "value": true}
     ],
-    "applyWhen": "startTurn",
+    "trigger": "onCast",
     "requiresAlive": true,
     "stackable": false
   },

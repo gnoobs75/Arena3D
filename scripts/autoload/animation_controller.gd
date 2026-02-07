@@ -31,6 +31,9 @@ func _connect_event_bus() -> void:
 	# Cards
 	EventBus.card_played.connect(_on_card_played)
 
+	# Turn lifecycle (for Beast form revert)
+	EventBus.turn_ended.connect(_on_turn_ended)
+
 
 func set_board(board: GameBoard) -> void:
 	"""Set reference to game board for accessing champion visuals."""
@@ -113,9 +116,39 @@ func _on_card_played(player_id: int, card_id: String, targets: Array) -> void:
 	if _board == null or _board.game_state == null:
 		return
 
+	# Check for Beast transformation cards
+	var card_data: Dictionary = {}
+	if CardDatabase:
+		card_data = CardDatabase.get_card(card_id) if CardDatabase.has_method("get_card") else {}
+
 	for champ in _board.game_state.get_all_champions():
 		if champ.owner_id == player_id:
 			var visual := get_champion_visual(champ.unique_id)
 			if visual:
+				# Beast form detection
+				if champ.champion_name == "Beast" and card_data.size() > 0:
+					_check_beast_transform(visual, card_data)
 				visual.play_cast_animation()
 				break  # Only animate one champion (first found)
+
+
+func _check_beast_transform(visual: ChampionVisual, card_data: Dictionary) -> void:
+	"""Detect Beast cards and trigger appropriate transformation."""
+	var card_name: String = card_data.get("name", "").to_lower()
+	if "bear" in card_name or "maul" in card_name or "hibernate" in card_name:
+		visual.set_beast_form("bear")
+	elif "elk" in card_name or "antler" in card_name or "charge" in card_name:
+		visual.set_beast_form("elk")
+	elif "ape" in card_name or "primal" in card_name or "pound" in card_name:
+		visual.set_beast_form("ape")
+
+
+func _on_turn_ended(player_id: int) -> void:
+	"""Revert Beast forms at turn end."""
+	if _board == null or _board.game_state == null:
+		return
+	for champ in _board.game_state.get_all_champions():
+		if champ.champion_name == "Beast":
+			var visual := get_champion_visual(champ.unique_id)
+			if visual:
+				visual.set_beast_form("base")

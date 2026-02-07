@@ -76,10 +76,18 @@ func _add_card_damage_dealt(amount: int) -> void:
 # --- X Variable System ---
 
 func request_x_value(player_id: int, card_name: String, caster: ChampionState, targets: Array, card_data: Dictionary) -> void:
-	"""Request player input for X value. Max X is current mana."""
-	var max_mana := game_state.get_mana(player_id)
-	var base_cost: int = card_data.get("baseCost", 0)  # Cost before X
-	var max_x := max_mana - base_cost
+	"""Request player input for X value. Max X depends on xSource (mana or hp)."""
+	var x_source: String = card_data.get("xSource", "mana")
+	var max_x: int = 0
+
+	if x_source == "hp":
+		# HP-based X: max is caster's current HP
+		max_x = caster.current_hp
+	else:
+		# Mana-based X: max is remaining mana minus base cost
+		var max_mana := game_state.get_mana(player_id)
+		var base_cost: int = card_data.get("baseCost", 0)
+		max_x = max_mana - base_cost
 
 	if max_x <= 0:
 		# Can't afford any X, use 0
@@ -93,7 +101,8 @@ func request_x_value(player_id: int, card_name: String, caster: ChampionState, t
 		"caster_id": caster.unique_id,
 		"targets": targets,
 		"card_data": card_data,
-		"max_x": max_x
+		"max_x": max_x,
+		"x_source": x_source
 	}
 
 	# Emit signal for UI to show X selector
@@ -117,11 +126,14 @@ func complete_x_selection(value: int) -> Dictionary:
 	if caster == null:
 		return {"success": false, "error": "Caster not found"}
 
-	# Spend the additional mana for X
+	# Spend the additional mana for X (skip for HP-based X cards like Pursuit)
 	var player_id: int = ctx.get("player_id", 1)
-	if _current_x_value > 0:
+	var x_source: String = ctx.get("x_source", "mana")
+	if _current_x_value > 0 and x_source == "mana":
 		game_state.spend_mana(player_id, _current_x_value)
 		print("X value set to %d, spent %d additional mana" % [_current_x_value, _current_x_value])
+	elif _current_x_value > 0:
+		print("X value set to %d (HP-based, no mana spent)" % _current_x_value)
 
 	# Continue processing the card
 	var card_name: String = ctx.get("card_name", "")

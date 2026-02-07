@@ -26,6 +26,7 @@ GameManager="*res://scripts/autoload/game_manager.gd"
 CombatLog="*res://scripts/autoload/combat_log.gd"
 AnimationController="*res://scripts/autoload/animation_controller.gd"
 DevLayout="*res://scripts/autoload/dev_layout_manager.gd"
+UIAnimator="*res://scripts/autoload/ui_animator.gd"
 
 [display]
 

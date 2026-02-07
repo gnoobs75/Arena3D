@@ -74,6 +74,7 @@ var _x_value_panel: Control = null
 var _x_chosen_value: int = 0
 var _x_max_value: int = 0
 var _x_card_name: String = ""
+var _x_source: String = "mana"  # "mana" or "hp"
 
 # Intel choice state
 var _intel_own_card: String = ""
@@ -484,10 +485,16 @@ func _start_game() -> void:
 	else:
 		# Initialize 2D board
 		board.initialize(state)
+		# Play board reveal animation
+		board.play_board_reveal()
 
 	hud.initialize(state)
 	hand_ui.setup(1)
 	response_slot.setup(1, state)
+
+	# Fade in from screen transition
+	if UIAnimator:
+		UIAnimator.transition_fade_in(0.4)
 
 	# Start the game
 	game_controller.start_game()
@@ -518,6 +525,9 @@ func _on_turn_started(player_id: int, round_number: int) -> void:
 
 	_update_ui()
 	_reset_input_state()
+
+	# Show dramatic turn banner
+	hud.show_turn_banner(player_id)
 
 	if developer_mode:
 		# Developer mode: step-through AI debugging
@@ -608,6 +618,11 @@ func _on_damage_dealt(attacker_id: String, target_id: String, amount: int) -> vo
 			var screen_pos := active_board.get_champion_screen_position(target_id)
 			if screen_pos != Vector2.ZERO:
 				hud.show_damage_number(amount, screen_pos)
+		# Shake portrait in HUD
+		hud.shake_portrait(target_id)
+		# Screen shake for heavy hits (3+ damage)
+		if amount >= 3 and UIAnimator:
+			UIAnimator.screen_shake(clampf(amount * 1.5, 3.0, 8.0), 0.2)
 
 
 func _on_healing_done(source_id: String, target_id: String, amount: int) -> void:
@@ -620,13 +635,58 @@ func _on_healing_done(source_id: String, target_id: String, amount: int) -> void
 			var screen_pos := active_board.get_champion_screen_position(target_id)
 			if screen_pos != Vector2.ZERO:
 				hud.show_heal_number(amount, screen_pos)
+		# Pulse portrait in HUD
+		hud.pulse_portrait_heal(target_id)
 
 
 func _on_game_ended(winner: int, reason: String) -> void:
-	"""Handle game over."""
+	"""Handle game over with dramatic effect."""
 	var winner_name := "Player 1" if winner == 1 else "AI"
-	hud.show_message("%s wins! %s" % [winner_name, reason], 10.0)
 	hud.set_action_buttons_enabled(false)
+
+	# Dramatic game over banner
+	var overlay := ColorRect.new()
+	overlay.color = Color(0, 0, 0, 0)
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.add_child(overlay)
+
+	var label := Label.new()
+	label.text = "%s WINS!" % winner_name.to_upper()
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.set_anchors_preset(Control.PRESET_CENTER)
+	label.offset_left = -300
+	label.offset_right = 300
+	label.offset_top = -50
+	label.offset_bottom = 50
+	label.add_theme_font_size_override("font_size", 48)
+	var win_color := VisualTheme.get_player_color(winner)
+	label.add_theme_color_override("font_color", win_color)
+	label.modulate.a = 0.0
+	label.pivot_offset = Vector2(300, 50)
+	label.scale = Vector2(0.5, 0.5)
+	hud.add_child(label)
+
+	var reason_label := Label.new()
+	reason_label.text = reason
+	reason_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	reason_label.set_anchors_preset(Control.PRESET_CENTER)
+	reason_label.offset_left = -300
+	reason_label.offset_right = 300
+	reason_label.offset_top = 40
+	reason_label.offset_bottom = 80
+	reason_label.add_theme_font_size_override("font_size", 20)
+	reason_label.add_theme_color_override("font_color", Color(0.8, 0.8, 0.85))
+	reason_label.modulate.a = 0.0
+	hud.add_child(reason_label)
+
+	# Animate
+	var tween := hud.create_tween()
+	tween.tween_property(overlay, "color:a", 0.5, 0.5)
+	tween.parallel().tween_property(label, "modulate:a", 1.0, 0.4)
+	tween.parallel().tween_property(label, "scale", Vector2.ONE, 0.5).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+	tween.tween_property(reason_label, "modulate:a", 1.0, 0.3)
 
 
 func _on_response_window_opened(trigger: String, context: Dictionary) -> void:
@@ -999,6 +1059,7 @@ func _try_cast_on_target(target_id: String) -> void:
 	print("Cast result: %s" % result)
 
 	if result.get("success", false):
+		hand_ui.play_card_fly_animation(selected_card)
 		hand_ui.clear_selection()
 		_update_after_action()
 		_reset_input_state()
@@ -1043,6 +1104,7 @@ func _try_cast_no_target() -> void:
 
 	if result.get("success", false):
 		print("  Cast successful! Updating UI...")
+		hand_ui.play_card_fly_animation(selected_card)
 		hand_ui.clear_selection()
 		_update_after_action()
 		_reset_input_state()
@@ -1358,7 +1420,10 @@ func _update_ui() -> void:
 		if priority_player == 1:
 			valid_responses = game_controller.response_stack.get_valid_responses(1)
 
-	hand_ui.update_hand(hand, mana, valid_responses)
+	# Compute cards restricted by champion state (e.g. already attacked/moved)
+	var restricted: Array[String] = _get_restricted_cards(state, hand)
+
+	hand_ui.update_hand(hand, mana, valid_responses, restricted)
 
 	# Update discard pile for player 1
 	var discard := state.get_discard(1)
@@ -1367,6 +1432,57 @@ func _update_ui() -> void:
 	# Update response slot
 	if response_slot:
 		response_slot.update_slot()
+
+
+func _get_restricted_cards(state: GameState, hand: Array) -> Array[String]:
+	"""Get cards that can't be played due to champion state restrictions.
+	E.g. cards with canAttack:false on self are restricted if the owning champion already attacked."""
+	var restricted: Array[String] = []
+	for card_name: String in hand:
+		var card_data := CardDatabase.get_card(card_name)
+		var card_type: String = str(card_data.get("type", ""))
+		if card_type == "Response":
+			continue
+		var card_character: String = card_data.get("character", "")
+		if card_character.is_empty():
+			continue
+		# Find the owning champion for this card
+		for champ: ChampionState in state.get_living_champions(1):
+			if champ.champion_name == card_character:
+				if _card_prevents_attack_on_self(card_data) and champ.has_attacked:
+					restricted.append(card_name)
+				elif _card_prevents_move_on_self(card_data) and champ.has_moved:
+					restricted.append(card_name)
+				break
+	return restricted
+
+
+func _card_prevents_attack_on_self(card_data: Dictionary) -> bool:
+	var card_target: String = str(card_data.get("target", "none"))
+	var effects: Array = card_data.get("effect", [])
+	for effect: Dictionary in effects:
+		if effect.get("type", "") == "debuff":
+			var debuff_name: String = effect.get("name", "")
+			var debuff_value = effect.get("value", true)
+			if debuff_name == "canAttack" and debuff_value == false:
+				var debuff_target: String = effect.get("target", "")
+				if debuff_target == "self" or (debuff_target == "" and card_target in ["self", "none"]):
+					return true
+	return false
+
+
+func _card_prevents_move_on_self(card_data: Dictionary) -> bool:
+	var card_target: String = str(card_data.get("target", "none"))
+	var effects: Array = card_data.get("effect", [])
+	for effect: Dictionary in effects:
+		if effect.get("type", "") == "debuff":
+			var debuff_name: String = effect.get("name", "")
+			var debuff_value = effect.get("value", true)
+			if debuff_name == "canMove" and debuff_value == false:
+				var debuff_target: String = effect.get("target", "")
+				if debuff_target == "self" or (debuff_target == "" and card_target in ["self", "none"]):
+					return true
+	return false
 
 
 func _get_enemy_positions() -> Array[Vector2i]:
@@ -1535,6 +1651,7 @@ func _try_cast_direction(clicked_pos: Vector2i) -> void:
 	print("Cast result: %s" % result)
 
 	if result.get("success", false):
+		hand_ui.play_card_fly_animation(selected_card)
 		hand_ui.clear_selection()
 		_update_after_action()
 		_reset_input_state()
@@ -1568,6 +1685,7 @@ func _try_cast_on_position(target_pos: Vector2i) -> void:
 	print("Cast result: %s" % result)
 
 	if result.get("success", false):
+		hand_ui.play_card_fly_animation(selected_card)
 		hand_ui.clear_selection()
 		_update_after_action()
 		_reset_input_state()
@@ -2233,12 +2351,13 @@ func _ai_handle_intel(caster_owner_id: int, own_card: String, opp_card: String) 
 # === X Value Choice Handling ===
 
 func _on_x_value_required(player_id: int, card_name: String, min_val: int, max_val: int) -> void:
-	"""Handle X-cost card — let player choose how much extra mana to spend."""
+	"""Handle X-cost card — let player choose X value."""
 	print("X value required for player %d, card %s (range %d-%d)" % [player_id, card_name, min_val, max_val])
 
 	_x_card_name = card_name
 	_x_max_value = max_val
 	_x_chosen_value = 0
+	_x_source = game_controller.effect_processor._pending_x_context.get("x_source", "mana")
 
 	if player_id != 1 or ai_vs_ai_mode:
 		_ai_handle_x_value(player_id, card_name, max_val)
@@ -2275,7 +2394,10 @@ func _create_x_value_panel(card_name: String, max_val: int) -> void:
 
 	# Description
 	var desc := Label.new()
-	desc.text = "Spend additional mana to increase X.\nOpponents cannot cast spells costing X or less."
+	if _x_source == "hp":
+		desc.text = "Spend life to gain movement.\nThe Barbarian loses X life and gains X movement."
+	else:
+		desc.text = "Spend additional mana to increase X.\nOpponents cannot cast spells costing X or less."
 	desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	desc.set_anchors_preset(Control.PRESET_CENTER_TOP)
 	desc.offset_top = 120
@@ -2298,17 +2420,23 @@ func _create_x_value_panel(card_name: String, max_val: int) -> void:
 	value_label.add_theme_color_override("font_color", Color(0.3, 0.8, 1.0))
 	_x_value_panel.add_child(value_label)
 
-	# Mana cost display
+	# Cost display (mana or life)
 	var mana_label := Label.new()
 	mana_label.name = "XManaLabel"
-	mana_label.text = "Additional mana: 0"
+	if _x_source == "hp":
+		mana_label.text = "Life cost: 0"
+	else:
+		mana_label.text = "Additional mana: 0"
 	mana_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	mana_label.set_anchors_preset(Control.PRESET_CENTER)
 	mana_label.offset_top = 10
 	mana_label.offset_left = -100
 	mana_label.offset_right = 100
 	mana_label.add_theme_font_size_override("font_size", 16)
-	mana_label.add_theme_color_override("font_color", Color(0.5, 0.5, 0.8))
+	if _x_source == "hp":
+		mana_label.add_theme_color_override("font_color", Color(0.8, 0.3, 0.3))
+	else:
+		mana_label.add_theme_color_override("font_color", Color(0.5, 0.5, 0.8))
 	_x_value_panel.add_child(mana_label)
 
 	# Buttons for each value (0 to max)
@@ -2382,7 +2510,10 @@ func _on_x_value_button(value: int, container: HBoxContainer) -> void:
 		value_label.text = "X = %d" % value
 	var mana_label: Label = _x_value_panel.get_node("XManaLabel")
 	if mana_label:
-		mana_label.text = "Additional mana: %d" % value
+		if _x_source == "hp":
+			mana_label.text = "Life cost: %d" % value
+		else:
+			mana_label.text = "Additional mana: %d" % value
 	var confirm_btn: Button = _x_value_panel.get_node("XConfirmBtn")
 	if confirm_btn:
 		confirm_btn.text = "Confirm (X = %d)" % value
@@ -2404,6 +2535,7 @@ func _cleanup_x_value() -> void:
 	_x_chosen_value = 0
 	_x_max_value = 0
 	_x_card_name = ""
+	_x_source = "mana"
 	input_mode = InputMode.SELECT_CHAMPION
 
 
@@ -2513,9 +2645,18 @@ func _ai_handle_discard_choice(player_id: int, count: int) -> void:
 
 
 func _ai_handle_x_value(player_id: int, card_name: String, max_val: int) -> void:
-	"""AI decides X value — maximize disruption by spending all available mana."""
-	var x_value := max_val  # AI spends maximum for maximum effect
-	print("AI choosing X = %d for %s" % [x_value, card_name])
+	"""AI decides X value based on card type."""
+	var x_value: int
+	if _x_source == "hp":
+		# HP-based X (Pursuit): spend enough to be useful but don't suicide
+		# AI spends up to half HP or enough to reach an enemy, capped safely
+		x_value = mini(max_val - 1, maxi(1, max_val / 2))
+		if x_value <= 0:
+			x_value = 1  # Minimum 1 for any effect
+	else:
+		# Mana-based X: maximize effect by spending all available mana
+		x_value = max_val
+	print("AI choosing X = %d for %s (source: %s)" % [x_value, card_name, _x_source])
 	game_controller.effect_processor.complete_x_selection(x_value)
 	_update_after_action()
 

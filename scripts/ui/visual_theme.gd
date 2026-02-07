@@ -6,18 +6,18 @@ class_name VisualTheme
 # === CHAMPION COLORS ===
 # Each champion has a primary and secondary color for gradients
 const CHAMPION_COLORS := {
-	"Brute": { "primary": Color(0.6, 0.35, 0.15), "secondary": Color(0.8, 0.5, 0.2) },
-	"Ranger": { "primary": Color(0.15, 0.45, 0.2), "secondary": Color(0.3, 0.6, 0.35) },
-	"Beast": { "primary": Color(0.45, 0.35, 0.2), "secondary": Color(0.6, 0.5, 0.3) },
-	"Redeemer": { "primary": Color(0.7, 0.6, 0.3), "secondary": Color(0.9, 0.85, 0.6) },
-	"Confessor": { "primary": Color(0.35, 0.15, 0.45), "secondary": Color(0.5, 0.25, 0.6) },
-	"Barbarian": { "primary": Color(0.6, 0.15, 0.1), "secondary": Color(0.8, 0.25, 0.15) },
-	"Burglar": { "primary": Color(0.25, 0.25, 0.3), "secondary": Color(0.4, 0.4, 0.45) },
-	"Berserker": { "primary": Color(0.5, 0.1, 0.15), "secondary": Color(0.7, 0.2, 0.2) },
-	"Shaman": { "primary": Color(0.15, 0.4, 0.5), "secondary": Color(0.3, 0.6, 0.7) },
-	"Illusionist": { "primary": Color(0.4, 0.2, 0.5), "secondary": Color(0.6, 0.35, 0.7) },
-	"DarkWizard": { "primary": Color(0.2, 0.1, 0.3), "secondary": Color(0.35, 0.2, 0.45) },
-	"Alchemist": { "primary": Color(0.3, 0.5, 0.2), "secondary": Color(0.5, 0.7, 0.3) }
+	"Brute": { "primary": Color(0.25, 0.55, 0.15), "secondary": Color(0.35, 0.45, 0.2) },
+	"Ranger": { "primary": Color(0.45, 0.32, 0.18), "secondary": Color(0.55, 0.42, 0.25) },
+	"Beast": { "primary": Color(0.2, 0.4, 0.15), "secondary": Color(0.3, 0.5, 0.25) },
+	"Redeemer": { "primary": Color(0.85, 0.8, 0.3), "secondary": Color(0.95, 0.9, 0.5) },
+	"Confessor": { "primary": Color(0.1, 0.12, 0.3), "secondary": Color(0.15, 0.18, 0.4) },
+	"Barbarian": { "primary": Color(0.85, 0.5, 0.1), "secondary": Color(0.7, 0.35, 0.1) },
+	"Burglar": { "primary": Color(0.35, 0.15, 0.45), "secondary": Color(0.25, 0.1, 0.35) },
+	"Berserker": { "primary": Color(0.8, 0.15, 0.1), "secondary": Color(0.6, 0.1, 0.08) },
+	"Shaman": { "primary": Color(0.5, 0.75, 0.9), "secondary": Color(0.35, 0.6, 0.8) },
+	"Illusionist": { "primary": Color(0.8, 0.2, 0.55), "secondary": Color(0.6, 0.15, 0.45) },
+	"DarkWizard": { "primary": Color(0.08, 0.08, 0.1), "secondary": Color(0.1, 0.3, 0.3) },
+	"Alchemist": { "primary": Color(0.3, 0.9, 0.15), "secondary": Color(0.2, 0.7, 0.1) }
 }
 
 # === CARD TYPE COLORS ===

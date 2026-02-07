@@ -136,12 +136,18 @@ func setup(player: int) -> void:
 		discard_pile.setup(player)
 
 
-func update_hand(hand: Array, mana: int, valid_responses: Array[String] = []) -> void:
+var _previous_hand_size: int = 0
+
+func update_hand(hand: Array, mana: int, valid_responses: Array[String] = [], restricted_cards: Array[String] = []) -> void:
 	"""Update displayed cards from hand array.
-	valid_responses: If non-empty, these response cards are playable (response window is open)."""
+	valid_responses: If non-empty, these response cards are playable (response window is open).
+	restricted_cards: Cards that cannot be played due to game state (e.g. champion already attacked)."""
 	if not _is_ready or cards_container == null:
 		return
+
+	var had_cards := _previous_hand_size
 	_clear_cards()
+	_previous_hand_size = hand.size()
 
 	# Determine playable cards
 	playable_cards.clear()
@@ -149,6 +155,10 @@ func update_hand(hand: Array, mana: int, valid_responses: Array[String] = []) ->
 		# In multi-select mode (discard selection), ALL cards are selectable
 		if multi_select_mode:
 			playable_cards.append(card_name)
+			continue
+
+		# Cards restricted by game state are never playable
+		if card_name in restricted_cards:
 			continue
 
 		var card_data := CardDatabase.get_card(card_name)
@@ -163,13 +173,32 @@ func update_hand(hand: Array, mana: int, valid_responses: Array[String] = []) ->
 			# Action/Equipment cards playable if we have mana
 			playable_cards.append(card_name)
 
-	# Create card visuals
+	# Detect if a card was drawn (hand grew by 1)
+	var new_card_drawn := hand.size() > had_cards and had_cards > 0
+
+	# Create card visuals with staggered entrance
 	for i in range(hand.size()):
 		var card_name: String = hand[i]
 		var is_playable := card_name in playable_cards
 		var card_visual := _create_card_visual(card_name, is_playable, i)
 		cards_container.add_child(card_visual)
 		card_visuals[i] = card_visual
+
+		var is_new_card := new_card_drawn and i == hand.size() - 1
+
+		# Staggered fan-in animation
+		card_visual.modulate.a = 0.0
+		card_visual.pivot_offset = card_visual.size / 2
+		card_visual.scale = Vector2(0.85, 0.85)
+		var tween := card_visual.create_tween()
+		tween.tween_interval(i * 0.04)
+		tween.tween_property(card_visual, "modulate:a", 1.0, 0.2).set_ease(Tween.EASE_OUT)
+		tween.parallel().tween_property(card_visual, "scale", Vector2.ONE, 0.25).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+
+		# Newly drawn card gets a golden flash highlight
+		if is_new_card:
+			tween.tween_property(card_visual, "modulate", Color(1.3, 1.2, 0.8), 0.15)
+			tween.tween_property(card_visual, "modulate", Color.WHITE, 0.3)
 
 
 func update_discard(discard: Array) -> void:
@@ -316,3 +345,50 @@ func _update_card_selection_visual(card_name: String, selected: bool) -> void:
 func get_multi_selected_cards() -> Array[String]:
 	"""Get all cards currently selected in multi-select mode."""
 	return multi_selected_cards
+
+
+func play_card_fly_animation(card_name: String) -> void:
+	"""Animate a card flying upward from hand when played."""
+	# Find the card visual in the hand
+	var source_card: CardVisual = null
+	for index: int in card_visuals:
+		var card: CardVisual = card_visuals[index]
+		if card.card_name == card_name:
+			source_card = card
+			break
+
+	if source_card == null:
+		return
+
+	# Create a temporary clone card for the animation
+	var fly_card: CardVisual = CARD_SCENE.instantiate()
+	fly_card.setup(card_name, true, false)
+	fly_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	fly_card.z_index = 50
+	fly_card.pivot_offset = Vector2(VisualTheme.CARD_WIDTH / 2, VisualTheme.CARD_HEIGHT / 2)
+
+	# Get start position before adding to tree
+	var start_pos := source_card.global_position
+
+	# Add to the scene tree at a high level so it renders above everything
+	var viewport := get_viewport()
+	if viewport and viewport.get_child(0):
+		viewport.get_child(0).add_child(fly_card)
+	else:
+		add_child(fly_card)
+
+	# Set position after adding to tree so global_position works
+	fly_card.global_position = start_pos
+
+	# Fly upward toward board center, scale up slightly, then fade
+	var target_pos := Vector2(
+		get_viewport_rect().size.x / 2 - fly_card.size.x / 2,
+		get_viewport_rect().size.y / 2 - fly_card.size.y
+	)
+
+	var tween := fly_card.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(fly_card, "global_position", target_pos, 0.35).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+	tween.tween_property(fly_card, "scale", Vector2(1.2, 1.2), 0.2).set_ease(Tween.EASE_OUT)
+	tween.tween_property(fly_card, "modulate:a", 0.0, 0.35).set_ease(Tween.EASE_IN).set_delay(0.1)
+	tween.chain().tween_callback(fly_card.queue_free)

@@ -437,6 +437,34 @@ func animate_attack(attacker_id: String, target_id: String) -> void:
 	target.play_hit_animation()
 
 
+func play_board_reveal() -> void:
+	"""Animate tiles appearing from center outward in a ripple."""
+	var center := Vector2(BOARD_SIZE / 2.0, BOARD_SIZE / 2.0)
+	var max_dist := center.length()
+
+	for y in range(BOARD_SIZE):
+		for x in range(BOARD_SIZE):
+			var tile: Control = tile_nodes[y][x]
+			var dist := Vector2(x, y).distance_to(center)
+			var delay := (dist / max_dist) * 0.4  # 0 to 0.4s based on distance from center
+
+			tile.modulate.a = 0.0
+			tile.pivot_offset = Vector2(TILE_SIZE / 2, TILE_SIZE / 2)
+			tile.scale = Vector2(0.6, 0.6)
+			var tween := tile.create_tween()
+			tween.tween_interval(delay)
+			tween.tween_property(tile, "modulate:a", 1.0, 0.2).set_ease(Tween.EASE_OUT)
+			tween.parallel().tween_property(tile, "scale", Vector2.ONE, 0.25).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+
+	# Champions fade in after board
+	for id in champion_nodes:
+		var visual: ChampionVisual = champion_nodes[id]
+		visual.modulate.a = 0.0
+		var tween := visual.create_tween()
+		tween.tween_interval(0.5)
+		tween.tween_property(visual, "modulate:a", 1.0, 0.3).set_ease(Tween.EASE_OUT)
+
+
 func get_board_size_pixels() -> Vector2:
 	"""Get total board size in pixels including margins."""
 	return Vector2(BOARD_SIZE * TILE_SIZE + COORD_MARGIN * 2, BOARD_SIZE * TILE_SIZE + COORD_MARGIN * 2)
@@ -516,11 +544,17 @@ class TileDrawer extends Control:
 
 
 class HighlightDrawer extends Control:
-	"""Custom drawing for tile highlights with gradients and glow."""
+	"""Custom drawing for tile highlights with gradients, glow, and breathing pulse."""
 	enum HighlightType { NONE, MOVE, ATTACK, CAST, SELECTED, RANGE }
 
 	var highlight_type: int = HighlightType.NONE
 	var is_hovered: bool = false
+	var _pulse_time: float = 0.0
+
+	func _process(delta: float) -> void:
+		if highlight_type != HighlightType.NONE:
+			_pulse_time += delta * 3.0
+			queue_redraw()
 
 	func _draw() -> void:
 		var w := size.x
@@ -570,13 +604,20 @@ class HighlightDrawer extends Control:
 			g.a = glow_color.a * (1.0 - float(i) / 2.0) * 0.5
 			draw_rect(Rect2(2 - i, 2 - i, w - 4 + i * 2, h - 4 + i * 2), g, false, 1.5)
 
-		# Fill with gradient
+		# Breathing pulse intensity
+		var pulse := 0.75 + sin(_pulse_time) * 0.25
+
+		# Fill with gradient + pulse
 		var fill_top := fill_color.lerp(Color.WHITE, 0.1)
 		var fill_bottom := fill_color
+		fill_top.a *= pulse
+		fill_bottom.a *= pulse
 		VisualTheme.draw_vertical_gradient(self, Rect2(3, 3, w - 6, h - 6), fill_top, fill_bottom)
 
-		# Border
-		draw_rect(Rect2(2, 2, w - 4, h - 4), border_color, false, 2.0)
+		# Border with pulse
+		var pulse_border := border_color
+		pulse_border.a *= (0.6 + pulse * 0.4)
+		draw_rect(Rect2(2, 2, w - 4, h - 4), pulse_border, false, 2.0)
 
 		# Extra hover brightness
 		if is_hovered:

@@ -1020,7 +1020,7 @@ func _would_card_have_effect(state: GameState, caster: ChampionState, card_data:
 				pass
 
 			# damageReduction/shield/immune — always potentially useful as protection
-			elif buff_name in ["damagereduction", "shield", "immune", "negateDamage"]:
+			elif buff_name in ["damagereduction", "shield", "immune", "negateDamage", "negatespell"]:
 				pass  # Always useful to have
 
 			# stealMana/gainMana/bonusMana — check if mana would be useful
@@ -2410,7 +2410,7 @@ func _score_response(card_name: String, trigger: String, context: Dictionary, st
 					score += value * 1.0
 			"buff":
 				var buff_name: String = effect.get("name", "")
-				if buff_name == "negateDamage":
+				if buff_name in ["negateDamage", "negateSpell"]:
 					score += 6.0  # Very valuable
 				elif buff_name == "dodge":
 					score += 5.0
@@ -2515,8 +2515,8 @@ func _score_response_card_for_slot(card_name: String, card_data: Dictionary, sta
 				score += 3.0
 			"buff":
 				var buff_name: String = effect.get("name", "")
-				if buff_name == "negateDamage":
-					score += 8.0  # Damage negation is very valuable
+				if buff_name in ["negateDamage", "negateSpell"]:
+					score += 8.0  # Damage/spell negation is very valuable
 				elif buff_name == "shield":
 					score += 6.0
 				else:
@@ -2790,7 +2790,7 @@ func _build_place_response_reasoning(action: Dictionary, state: GameState) -> Ar
 	for effect: Dictionary in effects:
 		var etype: String = str(effect.get("type", "")).to_lower()
 		var buff_name: String = effect.get("name", "")
-		if etype == "buff" and buff_name in ["negateDamage", "immune", "shield", "dodge"]:
+		if etype == "buff" and buff_name in ["negateDamage", "negateSpell", "immune", "shield", "dodge"]:
 			parts.append({"factor": "Defensive buff (%s)" % buff_name, "value": 3.0})
 		elif etype == "damage":
 			var value = effect.get("value", 0)

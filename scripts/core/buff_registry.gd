@@ -76,6 +76,11 @@ const BUFFS: Dictionary = {
 		"stackable": false,
 		"description": "Next damage is reduced to 0"
 	},
+	"negateSpell": {
+		"category": BuffCategory.DAMAGE_MODIFIER,
+		"stackable": false,
+		"description": "Next spell targeting this champion is negated"
+	},
 	"leech": {
 		"category": BuffCategory.DAMAGE_MODIFIER,
 		"stackable": false,

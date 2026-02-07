@@ -317,6 +317,30 @@ func _execute_cast(action: ActionSystem.CastCardAction, targets: Array) -> Dicti
 		if cost > 0:
 			EventBus.mana_spent.emit(caster.owner_id, cost, action.card_name)
 
+		# Check if any target has negateSpell buff - if so, negate the spell
+		var spell_negated := false
+		for target_id: String in targets:
+			var target := game_state.get_champion(str(target_id))
+			if target and target.has_buff("negateSpell"):
+				target.remove_buff("negateSpell")
+				spell_negated = true
+				print("Blood Shield: %s's spell '%s' negated on %s" % [caster.champion_name, action.card_name, target.champion_name])
+				break
+
+		if spell_negated:
+			var result := {
+				"success": true,
+				"action": "cast",
+				"card": action.card_name,
+				"caster": action.caster_id,
+				"targets": targets,
+				"effects": {"negated": true},
+				"spell_negated": true
+			}
+			action_performed.emit(result)
+			_check_win_condition()
+			return result
+
 		# Check for X-cost cards — need player input before processing effects
 		if card_data.get("hasXCost", false):
 			effect_processor.request_x_value(caster.owner_id, action.card_name, caster, targets, card_data)

@@ -861,9 +861,75 @@ func show_heal_number(amount: int, screen_pos: Vector2) -> void:
 	show_combat_text("+%d" % amount, screen_pos, Color(0.3, 1.0, 0.3), false)
 
 
+func show_turn_banner(player_id: int) -> void:
+	"""Dramatic turn start banner that slides across screen."""
+	var banner := ColorRect.new()
+	banner.color = VisualTheme.get_player_color(player_id).lerp(Color.BLACK, 0.3)
+	banner.color.a = 0.9
+	banner.set_anchors_preset(Control.PRESET_CENTER)
+	banner.offset_left = -400
+	banner.offset_right = 400
+	banner.offset_top = -35
+	banner.offset_bottom = 35
+	banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(banner)
+
+	var label := Label.new()
+	var player_name := "YOUR TURN" if player_id == 1 else "AI TURN"
+	label.text = player_name
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.set_anchors_preset(Control.PRESET_FULL_RECT)
+	label.add_theme_font_size_override("font_size", 28)
+	label.add_theme_color_override("font_color", Color.WHITE)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	banner.add_child(label)
+
+	# Slide in from right, hold, slide out left
+	banner.position.x = 1920
+	banner.modulate.a = 0.0
+	var tween := create_tween()
+	tween.tween_property(banner, "position:x", 0.0, 0.25).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+	tween.parallel().tween_property(banner, "modulate:a", 1.0, 0.15)
+	tween.tween_interval(0.6)
+	tween.tween_property(banner, "position:x", -1920.0, 0.25).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_CUBIC)
+	tween.parallel().tween_property(banner, "modulate:a", 0.0, 0.2)
+	tween.tween_callback(banner.queue_free)
+
+
+func shake_portrait(champion_id: String) -> void:
+	"""Shake a champion portrait on damage."""
+	for portrait in _player1_portrait_widgets + _player2_portrait_widgets:
+		if portrait.champion and portrait.champion.unique_id == champion_id:
+			var tween := portrait.create_tween()
+			var orig_x := portrait.position.x
+			tween.tween_property(portrait, "position:x", orig_x - 4, 0.03)
+			tween.tween_property(portrait, "position:x", orig_x + 4, 0.03)
+			tween.tween_property(portrait, "position:x", orig_x - 2, 0.03)
+			tween.tween_property(portrait, "position:x", orig_x, 0.03)
+			break
+
+
+func pulse_portrait_heal(champion_id: String) -> void:
+	"""Green pulse on a champion portrait for healing."""
+	for portrait in _player1_portrait_widgets + _player2_portrait_widgets:
+		if portrait.champion and portrait.champion.unique_id == champion_id:
+			var tween := portrait.create_tween()
+			tween.tween_property(portrait, "modulate", Color(0.6, 1.4, 0.6), 0.15)
+			tween.tween_property(portrait, "modulate", Color.WHITE, 0.25)
+			break
+
+
 func show_response_window(trigger: String, player_id: int) -> void:
 	if response_panel:
 		response_panel.visible = true
+		# Pop-in animation
+		response_panel.pivot_offset = response_panel.size / 2
+		response_panel.scale = Vector2(0.5, 0.5)
+		response_panel.modulate.a = 0.0
+		var tween := create_tween()
+		tween.tween_property(response_panel, "scale", Vector2.ONE, 0.2).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+		tween.parallel().tween_property(response_panel, "modulate:a", 1.0, 0.15)
 	if response_label:
 		var priority_text := "You" if player_id == 1 else "Opponent"
 		response_label.text = "Response: %s\n%s has priority" % [trigger, priority_text]
@@ -871,22 +937,56 @@ func show_response_window(trigger: String, player_id: int) -> void:
 
 func hide_response_window() -> void:
 	if response_panel:
-		response_panel.visible = false
+		# Shrink out
+		var tween := create_tween()
+		tween.tween_property(response_panel, "scale", Vector2(0.5, 0.5), 0.12).set_ease(Tween.EASE_IN)
+		tween.parallel().tween_property(response_panel, "modulate:a", 0.0, 0.1)
+		tween.tween_callback(func(): response_panel.visible = false)
 
 
 func show_message(text: String, duration: float = 2.0) -> void:
 	if message_label:
 		message_label.text = text
 		message_label.visible = true
-		await get_tree().create_timer(duration).timeout
-		message_label.visible = false
+		message_label.modulate.a = 0.0
+		var tween := create_tween()
+		tween.tween_property(message_label, "modulate:a", 1.0, 0.2)
+		tween.tween_interval(duration - 0.5)
+		tween.tween_property(message_label, "modulate:a", 0.0, 0.3)
+		tween.tween_callback(func(): message_label.visible = false)
 
+
+var _end_turn_pulse_tween: Tween
 
 func set_action_buttons_enabled(enabled: bool) -> void:
 	if end_turn_button:
 		end_turn_button.disabled = not enabled
+		# Pulse the end turn button when enabled to draw attention
+		if enabled:
+			_start_end_turn_pulse()
+		else:
+			_stop_end_turn_pulse()
 	if undo_button:
 		undo_button.disabled = not enabled
+
+
+func _start_end_turn_pulse() -> void:
+	if _end_turn_pulse_tween and _end_turn_pulse_tween.is_valid():
+		_end_turn_pulse_tween.kill()
+	if end_turn_button == null:
+		return
+	end_turn_button.pivot_offset = end_turn_button.size / 2
+	_end_turn_pulse_tween = end_turn_button.create_tween()
+	_end_turn_pulse_tween.set_loops()
+	_end_turn_pulse_tween.tween_property(end_turn_button, "scale", Vector2(1.04, 1.04), 0.5).set_ease(Tween.EASE_IN_OUT).set_trans(Tween.TRANS_SINE)
+	_end_turn_pulse_tween.tween_property(end_turn_button, "scale", Vector2(0.98, 0.98), 0.5).set_ease(Tween.EASE_IN_OUT).set_trans(Tween.TRANS_SINE)
+
+
+func _stop_end_turn_pulse() -> void:
+	if _end_turn_pulse_tween and _end_turn_pulse_tween.is_valid():
+		_end_turn_pulse_tween.kill()
+	if end_turn_button:
+		end_turn_button.scale = Vector2.ONE
 
 
 func _on_end_turn_pressed() -> void:
@@ -913,13 +1013,38 @@ func _on_combat_log_button_pressed() -> void:
 class ManaGem extends Control:
 	var is_filled: bool = true
 	var is_bonus: bool = false
+	var _was_filled: bool = true  # Track for fill/drain animation
+	var _anim_scale: float = 1.0
 
 	func _init() -> void:
 		custom_minimum_size = Vector2(22, 22)
+		pivot_offset = Vector2(11, 11)
 
 	func set_filled(filled: bool) -> void:
+		var changed := is_filled != filled
+		_was_filled = is_filled
 		is_filled = filled
+		if changed:
+			_play_change_anim()
 		queue_redraw()
+
+	func _play_change_anim() -> void:
+		"""Animate mana gem fill or drain."""
+		var tween := create_tween()
+		if is_filled:
+			# Fill: pop bigger with blue flash then settle
+			tween.tween_property(self, "modulate", Color(0.6, 0.8, 1.5), 0.06)
+			tween.parallel().tween_property(self, "scale", Vector2(1.3, 1.3), 0.08).set_ease(Tween.EASE_OUT)
+			tween.tween_property(self, "modulate", Color.WHITE, 0.15)
+			tween.parallel().tween_property(self, "scale", Vector2.ONE, 0.12).set_ease(Tween.EASE_IN_OUT).set_trans(Tween.TRANS_BACK)
+		else:
+			# Drain: flash bright then shrink with color drain
+			tween.tween_property(self, "modulate", Color(0.4, 0.6, 1.4), 0.05)
+			tween.parallel().tween_property(self, "scale", Vector2(1.15, 1.15), 0.05)
+			tween.tween_property(self, "scale", Vector2(0.65, 0.65), 0.08)
+			tween.parallel().tween_property(self, "modulate", Color(0.6, 0.6, 0.7), 0.08)
+			tween.tween_property(self, "scale", Vector2.ONE, 0.12).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+			tween.parallel().tween_property(self, "modulate", Color.WHITE, 0.12)
 
 	func _draw() -> void:
 		var center := size / 2
@@ -1220,6 +1345,8 @@ class FloatingCombatText extends Control:
 	var _lifetime: float = 1.5
 	var _elapsed: float = 0.0
 	var _font_size: int = 18
+	var _is_damage: bool = true
+	var _start_scale: float = 1.0
 
 	func _init() -> void:
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1228,8 +1355,17 @@ class FloatingCombatText extends Control:
 	func setup(text: String, screen_pos: Vector2, color: Color = Color.WHITE, is_damage: bool = true) -> void:
 		_text = text
 		_color = color
-		_font_size = 20 if is_damage else 16
+		_is_damage = is_damage
+		_font_size = 22 if is_damage else 18
+		_start_scale = 1.4 if is_damage else 1.0
 		position = screen_pos - Vector2(50, 25)
+
+		# Impact pop animation for damage
+		if is_damage:
+			scale = Vector2(_start_scale, _start_scale)
+			pivot_offset = Vector2(50, 25)
+			var tween := create_tween()
+			tween.tween_property(self, "scale", Vector2.ONE, 0.2).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
 
 	func _process(delta: float) -> void:
 		_elapsed += delta
@@ -1240,13 +1376,30 @@ class FloatingCombatText extends Control:
 
 	func _draw() -> void:
 		var progress := _elapsed / _lifetime
-		var y_offset := -40.0 * progress
-		var alpha := 1.0 - progress * progress
+
+		# Different motion curves for damage vs heal
+		var y_offset: float
+		if _is_damage:
+			# Damage: fast up, then slow drift
+			y_offset = -50.0 * (1.0 - pow(1.0 - progress, 3.0))
+		else:
+			# Heal: gentle float up
+			y_offset = -35.0 * progress
+
+		# Fade: sharp initial, then gentle
+		var alpha: float
+		if progress < 0.3:
+			alpha = 1.0
+		else:
+			alpha = 1.0 - ((progress - 0.3) / 0.7) * ((progress - 0.3) / 0.7)
+
 		var draw_color := _color
 		draw_color.a = alpha
 		var outline := Color.BLACK
-		outline.a = alpha * 0.8
+		outline.a = alpha * 0.9
 		var pos := Vector2(50, 25 + y_offset)
-		for off in [Vector2(-1, -1), Vector2(1, -1), Vector2(-1, 1), Vector2(1, 1)]:
+
+		# Thicker outline for more impact
+		for off in [Vector2(-1.5, -1.5), Vector2(1.5, -1.5), Vector2(-1.5, 1.5), Vector2(1.5, 1.5), Vector2(0, -2), Vector2(0, 2), Vector2(-2, 0), Vector2(2, 0)]:
 			draw_string(ThemeDB.fallback_font, pos + off, _text, HORIZONTAL_ALIGNMENT_CENTER, 100, _font_size, outline)
 		draw_string(ThemeDB.fallback_font, pos, _text, HORIZONTAL_ALIGNMENT_CENTER, 100, _font_size, draw_color)

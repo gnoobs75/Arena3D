@@ -318,30 +318,34 @@ class CastCardAction extends Action:
 
 	func _card_prevents_attack_on_self(card_data: Dictionary) -> bool:
 		"""Check if a card applies canAttack: false debuff to self."""
+		var card_target: String = str(card_data.get("target", "none"))
 		var effects: Array = card_data.get("effect", [])
 		for effect: Dictionary in effects:
 			var effect_type: String = effect.get("type", "")
 			if effect_type == "debuff":
 				var debuff_name: String = effect.get("name", "")
-				var debuff_target: String = effect.get("target", "")
 				var debuff_value = effect.get("value", true)
-				# Check for canAttack debuff on self
-				if debuff_name == "canAttack" and debuff_target == "self" and debuff_value == false:
-					return true
+				if debuff_name == "canAttack" and debuff_value == false:
+					# Effect targets self if it explicitly says so, or if it inherits
+					# from a card targeting "self" or "none" (caster)
+					var debuff_target: String = effect.get("target", "")
+					if debuff_target == "self" or (debuff_target == "" and card_target in ["self", "none"]):
+						return true
 		return false
 
 	func _card_prevents_move_on_self(card_data: Dictionary) -> bool:
 		"""Check if a card applies canMove: false debuff to self."""
+		var card_target: String = str(card_data.get("target", "none"))
 		var effects: Array = card_data.get("effect", [])
 		for effect: Dictionary in effects:
 			var effect_type: String = effect.get("type", "")
 			if effect_type == "debuff":
 				var debuff_name: String = effect.get("name", "")
-				var debuff_target: String = effect.get("target", "")
 				var debuff_value = effect.get("value", true)
-				# Check for canMove debuff on self
-				if debuff_name == "canMove" and debuff_target == "self" and debuff_value == false:
-					return true
+				if debuff_name == "canMove" and debuff_value == false:
+					var debuff_target: String = effect.get("target", "")
+					if debuff_target == "self" or (debuff_target == "" and card_target in ["self", "none"]):
+						return true
 		return false
 
 	func _validate_targets(state: GameState, card_data: Dictionary) -> bool:
