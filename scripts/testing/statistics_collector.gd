@@ -27,6 +27,7 @@ var total_rounds: int = 0
 var total_turns: int = 0
 var total_card_plays: int = 0
 var total_noop_plays: int = 0
+var total_success_plays: int = 0
 var total_errors: int = 0
 
 ## Cards played in current match (for win correlation tracking)
@@ -63,6 +64,7 @@ func reset() -> void:
 	total_turns = 0
 	total_card_plays = 0
 	total_noop_plays = 0
+	total_success_plays = 0
 	total_errors = 0
 
 
@@ -171,18 +173,12 @@ func record_card_play(play: MatchResult.CardPlayRecord, effect_result: EffectTra
 		if effect_result.is_noop:
 			total_noop_plays += 1
 			stats.record_noop(effect_result.noop_reason)
-	elif play.is_noop:
-		total_noop_plays += 1
-		stats.record_noop(play.noop_reason)
-		stats.record_effect(
-			play.damage_dealt,
-			play.healing_done,
-			play.buffs_applied,
-			play.debuffs_applied,
-			play.movements_caused,
-			play.cards_drawn
-		)
+		else:
+			# Successful play
+			total_success_plays += 1
+			stats.record_success(effect_result.success_effects)
 	else:
+		# Using CardPlayRecord data (from test_orchestrator)
 		stats.record_effect(
 			play.damage_dealt,
 			play.healing_done,
@@ -191,6 +187,14 @@ func record_card_play(play: MatchResult.CardPlayRecord, effect_result: EffectTra
 			play.movements_caused,
 			play.cards_drawn
 		)
+
+		if play.is_noop:
+			total_noop_plays += 1
+			stats.record_noop(play.noop_reason)
+		elif play.is_success:
+			# Successful play from stored record
+			total_success_plays += 1
+			stats.record_success(play.success_effects)
 
 	# Record champion card play
 	var champ_name := play.caster_name
@@ -287,6 +291,10 @@ func generate_report() -> SessionReport:
 	report.low_usage_cards = _get_low_usage_cards(0.30)  # Cards played less than 30% of draws
 	report.high_discard_cards = _get_high_discard_cards(0.30)  # Cards discarded more than 30% of draws
 	report.never_played_cards = _get_never_played_cards()  # Cards drawn but never played
+
+	# Successful cards analysis
+	report.total_success_plays = total_success_plays
+	report.successful_cards = _get_successful_cards(0.70)  # Cards with >70% success rate
 
 	return report
 
@@ -500,6 +508,38 @@ func _get_never_played_cards() -> Array[Dictionary]:
 
 	# Sort by times drawn descending
 	result.sort_custom(func(a, b): return a["times_drawn"] > b["times_drawn"])
+
+	return result
+
+
+func _get_successful_cards(threshold: float) -> Array[Dictionary]:
+	"""Get cards with success rate above threshold."""
+	var result: Array[Dictionary] = []
+
+	for card_name: String in card_stats:
+		var stats: CardStats = card_stats[card_name]
+		if stats.times_played >= 5 and stats.success_rate >= threshold:
+			result.append({
+				"card_name": card_name,
+				"champion": stats.champion,
+				"times_played": stats.times_played,
+				"success_count": stats.success_count,
+				"success_rate": stats.success_rate,
+				"effects_summary": stats.get_success_summary(),
+				"avg_damage": stats.avg_damage_per_play,
+				"avg_healing": stats.avg_healing_per_play,
+				"total_damage": stats.total_damage_dealt,
+				"total_healing": stats.total_healing_done,
+				"buffs_applied": stats.buffs_applied,
+				"debuffs_applied": stats.debuffs_applied
+			})
+
+	# Sort by success rate descending, then by times played
+	result.sort_custom(func(a, b):
+		if abs(a["success_rate"] - b["success_rate"]) < 0.001:
+			return a["times_played"] > b["times_played"]
+		return a["success_rate"] > b["success_rate"]
+	)
 
 	return result
 

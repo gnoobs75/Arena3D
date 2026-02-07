@@ -20,6 +20,7 @@ func print_report(report: SessionReport) -> void:
 	_print_champion_stats(report)
 	_print_pair_stats(report)
 	_print_matchup_stats(report)
+	_print_successful_cards(report)
 	_print_noop_analysis(report)
 	_print_card_usage_analysis(report)
 	_print_impactful_cards(report)
@@ -73,8 +74,13 @@ func _print_summary(report: SessionReport) -> void:
 		report.avg_rounds_per_match,
 		report.avg_turns_per_match
 	])
-	print("Card Plays: %d | No-ops: %d (%.1f%%)" % [
+	var success_rate := 0.0
+	if report.total_card_plays > 0:
+		success_rate = float(report.total_success_plays) / float(report.total_card_plays) * 100
+	print("Card Plays: %d | Success: %d (%.1f%%) | No-ops: %d (%.1f%%)" % [
 		report.total_card_plays,
+		report.total_success_plays,
+		success_rate,
 		report.total_noop_plays,
 		report.overall_noop_rate * 100
 	])
@@ -193,6 +199,38 @@ func _print_matchup_stats(report: SessionReport) -> void:
 			matchup_str,
 			record_str,
 			matchup["team1_win_rate"] * 100
+		])
+
+	print("")
+
+
+func _print_successful_cards(report: SessionReport) -> void:
+	"""Print successful card analysis."""
+	if report.successful_cards.is_empty():
+		return
+
+	print("SUCCESSFUL CARDS (>70%% success rate)")
+	print(LINE)
+	print("%-20s | %s | %s | %s | %s" % ["Card", "Played", "Success", "Rate", "Effects"])
+	print("-" .repeat(75))
+
+	for card: Dictionary in report.successful_cards.slice(0, 15):
+		print("%-20s | %6d | %6d | %5.1f%% | %s" % [
+			str(card.get("card_name", "?")).substr(0, 20),
+			card.get("times_played", 0),
+			card.get("success_count", 0),
+			card.get("success_rate", 0) * 100,
+			str(card.get("effects_summary", "")).substr(0, 25)
+		])
+
+	# Print summary of total successful plays
+	if report.total_card_plays > 0:
+		var success_pct := float(report.total_success_plays) / float(report.total_card_plays) * 100
+		print("")
+		print("Total: %d/%d card plays successful (%.1f%%)" % [
+			report.total_success_plays,
+			report.total_card_plays,
+			success_pct
 		])
 
 	print("")

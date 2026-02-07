@@ -99,6 +99,11 @@ custom_minimum_size = Vector2(280, 50)
 layout_mode = 2
 text = "3D Battle Chess (WIP)"
 
+[node name="ButtonDev" type="Button" parent="ButtonContainer"]
+custom_minimum_size = Vector2(280, 50)
+layout_mode = 2
+text = "Developer Mode"
+
 [node name="VersionLabel" type="Label" parent="."]
 layout_mode = 1
 anchors_preset = 3

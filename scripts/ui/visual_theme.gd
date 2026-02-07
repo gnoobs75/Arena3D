@@ -91,8 +91,8 @@ const HP_BAR_BG := Color(0.15, 0.15, 0.18)
 const HP_BAR_BORDER := Color(0.3, 0.3, 0.35)
 
 # === SIZES ===
-const CARD_WIDTH := 120
-const CARD_HEIGHT := 160
+const CARD_WIDTH := 140
+const CARD_HEIGHT := 185
 const CARD_BORDER := 2
 const TILE_SIZE := 64
 const CHAMPION_TOKEN_SIZE := 52

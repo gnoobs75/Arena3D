@@ -114,6 +114,7 @@ func _show_splash_screen() -> void:
 	var splash_scene: PackedScene = preload("res://scenes/main/splash_screen.tscn")
 	splash_screen = splash_scene.instantiate()
 	splash_screen.mode_selected.connect(_on_mode_selected)
+	splash_screen.developer_mode_selected.connect(_on_developer_mode_selected)
 	add_child(splash_screen)
 	print("Main: Splash screen displayed")
 
@@ -129,6 +130,47 @@ func _on_mode_selected(use_3d: bool) -> void:
 
 	# Show character selection screen
 	_show_character_select(use_3d)
+
+
+func _on_developer_mode_selected() -> void:
+	"""Handle developer mode selection - skip character select, use random teams."""
+	print("Main: Developer Mode selected")
+
+	# Remove splash screen
+	if splash_screen and is_instance_valid(splash_screen):
+		splash_screen.queue_free()
+		splash_screen = null
+
+	# Generate random teams
+	var all_champions := CardDatabase.get_all_champion_names()
+	all_champions.shuffle()
+
+	var p1_champions: Array = [all_champions[0], all_champions[1]]
+	var p2_champions: Array = [all_champions[2], all_champions[3]]
+
+	print("Main: Random teams - P1: %s, P2: %s" % [p1_champions, p2_champions])
+
+	# Start game in developer mode (skip character select)
+	_start_developer_mode_game(p1_champions, p2_champions)
+
+
+func _start_developer_mode_game(p1_champions: Array, p2_champions: Array) -> void:
+	"""Start the game in developer mode with AI vs AI and step-through controls."""
+	# Hide the loading UI
+	var ui: Node = get_node_or_null("UI")
+	if ui:
+		ui.visible = false
+
+	# Load 2D game scene (developer mode uses 2D for simplicity)
+	print("Main: Loading Developer Mode game scene...")
+	var game_scene: PackedScene = preload("res://scenes/game/game.tscn")
+	var game: Node = game_scene.instantiate()
+	game.set_meta("p1_champions", p1_champions)
+	game.set_meta("p2_champions", p2_champions)
+	game.set_meta("ai_vs_ai", true)
+	game.set_meta("developer_mode", true)
+	add_child(game)
+	print("Main: Developer Mode game started with teams P1:%s P2:%s" % [p1_champions, p2_champions])
 
 
 func _show_character_select(use_3d: bool) -> void:

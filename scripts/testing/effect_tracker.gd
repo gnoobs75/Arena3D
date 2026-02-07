@@ -151,6 +151,9 @@ func end_card_tracking() -> EffectResult:
 	result.is_noop = _determine_if_noop()
 	result.noop_reason = _determine_noop_reason()
 
+	# Determine what effects succeeded
+	result.success_effects = _determine_success_effects()
+
 	# Emit signal
 	card_play_tracked.emit(_current_card, result)
 	if result.is_noop:
@@ -161,14 +164,51 @@ func end_card_tracking() -> EffectResult:
 
 func _determine_if_noop() -> bool:
 	"""Determine if the card play was a no-op."""
-	# Check if card has statMod effects - these don't emit signals but still work
 	var card_data := CardDatabase.get_card(_current_card)
+
+	# Equipment cards are processed separately - equipping is always a valid action
+	if card_data.get("type", "") == "Equipment":
+		return false
+
+	# Cards with customHandler always do something (special processing)
+	if card_data.has("customHandler"):
+		return false
+
+	# Delayed effect cards (applyWhen) work via a different mechanism
+	if card_data.has("applyWhen"):
+		return false
+
+	# Check if card has effect types that don't emit signals but still work
 	var effects: Array = card_data.get("effect", [])
 	for effect: Dictionary in effects:
 		var etype: String = str(effect.get("type", "")).to_lower()
-		# statMod, gainmana, lockmana, stealmana all work without signals
-		if etype in ["statmod", "gainmana", "lockmana", "stealmana"]:
+		# statMod, gainmana, lockmana, stealmana, custom all work without standard signals
+		if etype in ["statmod", "gainmana", "lockmana", "stealmana", "custom"]:
 			return false
+		# Special buffs that work without standard buff signals or have immediate effects
+		if etype == "buff":
+			var buff_name: String = str(effect.get("name", "")).to_lower()
+			# createWall/createPits create terrain, gainMana immediately grants mana
+			if buff_name in ["createwall", "createpits", "gainmana"]:
+				return false
+		# Move "immediate" requires player input and works separately
+		if etype == "move":
+			var move_value: String = str(effect.get("value", "")).to_lower()
+			if move_value == "immediate":
+				return false
+		# Attack "immediate" also requires player input
+		if etype == "attack":
+			var attack_value: String = str(effect.get("value", "")).to_lower()
+			if attack_value == "immediate":
+				return false
+		# Control effect (Betrayal) - emits signal for mind control, always has effect
+		if etype == "control":
+			return false
+		# Discard with player choice (value "any") works separately
+		if etype == "discard":
+			var discard_value = effect.get("value", 0)
+			if discard_value is String and discard_value == "any":
+				return false
 
 	# A card is a no-op if ALL effects had no impact
 	return (
@@ -294,6 +334,51 @@ func _analyze_move_noop(effect: Dictionary) -> String:
 			return "movement_blocked"
 
 
+func _determine_success_effects() -> Array[String]:
+	"""Determine which effects succeeded for this card play."""
+	var effects: Array[String] = []
+
+	if _damage_dealt > 0:
+		effects.append("damage")
+	if _healing_done > 0:
+		effects.append("heal")
+	if _buffs_applied > 0:
+		effects.append("buff")
+	if _debuffs_applied > 0:
+		effects.append("debuff")
+	if _movements_caused > 0:
+		effects.append("move")
+	if _cards_drawn > 0:
+		effects.append("draw")
+	if _mana_changed > 0:
+		effects.append("mana")
+
+	# Check for special card types that always succeed
+	var card_data := CardDatabase.get_card(_current_card)
+
+	# Equipment cards equipping is always a success
+	if card_data.get("type", "") == "Equipment" and effects.is_empty():
+		effects.append("equip")
+
+	# Custom handlers are considered successful
+	if card_data.has("customHandler") and effects.is_empty():
+		effects.append("custom")
+
+	# Delayed effect cards
+	if card_data.has("applyWhen") and effects.is_empty():
+		effects.append("delayed")
+
+	# statMod effects that don't show in signals
+	var card_effects: Array = card_data.get("effect", [])
+	for effect: Dictionary in card_effects:
+		var etype: String = str(effect.get("type", "")).to_lower()
+		if etype == "statmod" and "statmod" not in effects:
+			effects.append("statmod")
+			break
+
+	return effects
+
+
 # --- Signal Handlers ---
 
 func _on_damage_dealt(attacker: String, target: String, amount: int) -> void:
@@ -387,6 +472,7 @@ class EffectResult extends RefCounted:
 
 	var is_noop: bool = false
 	var noop_reason: String = ""
+	var success_effects: Array[String] = []  # Effect types that succeeded
 
 	func _init() -> void:
 		damage_targets = []
@@ -394,6 +480,7 @@ class EffectResult extends RefCounted:
 		buff_details = []
 		debuff_details = []
 		movement_details = []
+		success_effects = []
 
 	func had_effect() -> bool:
 		return not is_noop
@@ -412,6 +499,7 @@ class EffectResult extends RefCounted:
 			"mana_changed": mana_changed,
 			"is_noop": is_noop,
 			"noop_reason": noop_reason,
+			"success_effects": success_effects,
 			"damage_targets": damage_targets,
 			"heal_targets": heal_targets
 		}

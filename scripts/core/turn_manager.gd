@@ -65,6 +65,13 @@ func _execute_start_phase() -> void:
 	# Reset mana to 5
 	game_state.reset_mana(player_id)
 
+	# Process bonusMana buffs (Pick Pocket) - grant extra mana at turn start
+	for champion: ChampionState in game_state.get_champions(player_id):
+		if champion.is_alive() and champion.has_buff("bonusMana"):
+			var bonus := champion.get_buff_stacks("bonusMana")
+			game_state.add_mana(player_id, bonus)
+			print("Turn start: %s (player %d) grants %d bonus mana" % [champion.champion_name, player_id, bonus])
+
 	# Reset champion action flags
 	for champion: ChampionState in game_state.get_champions(player_id):
 		champion.reset_turn()

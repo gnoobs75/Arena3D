@@ -1,22 +1,27 @@
 extends Control
 class_name HandUI
 ## HandUI - Enhanced container for player's hand of cards
-## Includes card display and discard pile
+## Includes card display, discard pile, and hover preview
 
 signal card_selected(card_name: String)
 signal card_deselected()
 signal card_toggled(card_name: String, selected: bool)  # For multi-select mode
 signal discard_pile_clicked(player_id: int)
 
-const CARD_SPACING := 12  # Increased for better spacing
+const CARD_SPACING := 8  # Spacing between cards
 const CARD_SCENE := preload("res://scenes/game/cards/card_visual.tscn")
 const DISCARD_SCENE := preload("res://scenes/game/cards/discard_pile.tscn")
+const PREVIEW_SCALE := 1.8  # Scale factor for preview card
 
 # Node references - fetched in _ready() for safety
 var cards_container: HBoxContainer
 var discard_pile: DiscardPile
 var background: ColorRect
 var _is_ready: bool = false
+
+# Card preview
+var card_preview: CardVisual = null
+var preview_container: Control = null
 
 var player_id: int = 1
 var card_visuals: Dictionary = {}  # card_index -> CardVisual
@@ -29,6 +34,13 @@ var multi_selected_cards: Array[String] = []
 
 
 func _ready() -> void:
+	# Set up anchors for bottom positioning
+	set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	offset_top = -200  # Height of the hand area
+	offset_left = 240   # After left side panel (220 + margin)
+	offset_right = -240  # Before right side panel
+	offset_bottom = 0
+
 	_create_ui()
 	_is_ready = true
 
@@ -96,6 +108,25 @@ func _create_ui() -> void:
 	cards_container.add_theme_constant_override("separation", CARD_SPACING)
 	cards_container.mouse_filter = Control.MOUSE_FILTER_PASS
 	cards_panel.add_child(cards_container)
+
+	# Create preview container (positioned above the hand)
+	_create_preview_container()
+
+
+func _create_preview_container() -> void:
+	"""Create the card preview popup that appears on hover."""
+	preview_container = Control.new()
+	preview_container.name = "PreviewContainer"
+	preview_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	preview_container.visible = false
+	preview_container.z_index = 100  # Always on top
+	add_child(preview_container)
+
+	# Create the preview card visual
+	card_preview = CARD_SCENE.instantiate()
+	card_preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card_preview.scale = Vector2(PREVIEW_SCALE, PREVIEW_SCALE)
+	preview_container.add_child(card_preview)
 
 
 func setup(player: int) -> void:
@@ -190,12 +221,51 @@ func _on_card_clicked(card_name: String) -> void:
 
 
 func _on_card_hovered(card_name: String) -> void:
-	# Could show card detail popup
-	pass
+	"""Show large preview when hovering over a card."""
+	if preview_container == null or card_preview == null:
+		return
+
+	# Find the hovered card visual to position the preview
+	var hovered_card: CardVisual = null
+	for index: int in card_visuals:
+		var card: CardVisual = card_visuals[index]
+		if card.card_name == card_name:
+			hovered_card = card
+			break
+
+	if hovered_card == null:
+		return
+
+	# Setup the preview card
+	card_preview.setup(card_name, true, false)
+
+	# Position preview above the hovered card, centered horizontally
+	var card_global_pos := hovered_card.global_position
+	var card_center_x := card_global_pos.x + hovered_card.size.x / 2
+	var preview_width := VisualTheme.CARD_WIDTH * PREVIEW_SCALE
+	var preview_height := VisualTheme.CARD_HEIGHT * PREVIEW_SCALE
+
+	# Convert to local position relative to this control
+	var local_pos := Vector2.ZERO
+	local_pos.x = card_center_x - global_position.x - preview_width / 2
+	local_pos.y = -preview_height - 20  # Above the hand with some padding
+
+	# Clamp horizontal position to keep preview on screen
+	var screen_width := get_viewport_rect().size.x
+	var global_preview_x := global_position.x + local_pos.x
+	if global_preview_x < 10:
+		local_pos.x = 10 - global_position.x
+	elif global_preview_x + preview_width > screen_width - 10:
+		local_pos.x = screen_width - 10 - preview_width - global_position.x
+
+	preview_container.position = local_pos
+	preview_container.visible = true
 
 
-func _on_card_unhovered(card_name: String) -> void:
-	pass
+func _on_card_unhovered(_card_name: String) -> void:
+	"""Hide preview when not hovering."""
+	if preview_container:
+		preview_container.visible = false
 
 
 func _on_discard_clicked(pid: int) -> void:

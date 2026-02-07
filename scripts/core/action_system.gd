@@ -286,13 +286,23 @@ class CastCardAction extends Action:
 		var card_data := CardDatabase.get_card(card_name)
 		var cost: int = card_data.get("cost", 0)
 
-		# Check for freeRangerCard buff - Ranger cards cost 0
+		# CRITICAL: Champions can only cast their own cards
 		var card_character: String = card_data.get("character", "")
+		if not card_character.is_empty() and card_character != caster.champion_name:
+			return false  # This card belongs to a different champion
+
+		# Check for freeRangerCard buff - Ranger cards cost 0
 		if card_character == "Ranger" and caster.has_buff("freeRangerCard"):
 			cost = 0  # Free Ranger card
 
 		if state.get_mana(caster.owner_id) < cost:
 			return false
+
+		# Check maxCastCost debuff — blocks casting spells at or below X cost
+		if caster.has_debuff("maxCastCost"):
+			var max_blocked: int = caster.get_debuff_stacks("maxCastCost")
+			if cost <= max_blocked:
+				return false
 
 		# Check for action restriction conflicts
 		# If a card applies "canAttack: false" to self, caster must not have attacked yet
@@ -386,7 +396,14 @@ class CastCardAction extends Action:
 				if targets.is_empty():
 					return false
 				var pos_str: String = str(targets[0])
-				return pos_str.contains(",")  # Basic validation
+				if not pos_str.contains(","):
+					return false
+				# Validate position is within caster's range
+				var parts := pos_str.split(",")
+				if parts.size() != 2:
+					return false
+				var target_pos := Vector2i(int(parts[0]), int(parts[1]))
+				return _is_position_in_range(caster, target_pos)
 			_:
 				return true
 
@@ -413,6 +430,26 @@ class CastCardAction extends Action:
 			if dx != 0 and dy != 0:
 				return false
 
+			var dist: int = absi(dx) + absi(dy)
+			return dist <= caster.current_range
+
+	func _is_position_in_range(caster: ChampionState, target_pos: Vector2i) -> bool:
+		"""Check if a board position is within caster's range."""
+		var caster_pos: Vector2i = caster.position
+		var is_melee: bool = caster.current_range <= 1
+
+		if is_melee:
+			var dist: int = maxi(absi(target_pos.x - caster_pos.x), absi(target_pos.y - caster_pos.y))
+			return dist <= caster.current_range
+		else:
+			# Ranged: cardinal direction within range, OR adjacent (Chebyshev <= 1)
+			var dx: int = target_pos.x - caster_pos.x
+			var dy: int = target_pos.y - caster_pos.y
+			var chebyshev: int = maxi(absi(dx), absi(dy))
+			if chebyshev <= 1:
+				return true
+			if dx != 0 and dy != 0:
+				return false
 			var dist: int = absi(dx) + absi(dy)
 			return dist <= caster.current_range
 

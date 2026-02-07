@@ -9,17 +9,28 @@ signal healing_done(source: String, target: String, amount: int)
 signal buff_applied(target: String, buff_name: String, duration: int)
 signal debuff_applied(target: String, debuff_name: String, duration: int)
 signal champion_moved(champion: String, from: Vector2i, to: Vector2i)
+signal cards_drawn(player_id: int, count: int, is_extra: bool)  # For Hypocrite onDraw trigger
 signal immediate_movement_required(champion_ids: Array, movement_bonus: int)
 signal discard_selection_required(player_id: int, caster_id: String, damage_per_card: int)
 signal x_value_required(player_id: int, card_name: String, min_val: int, max_val: int)
 signal choice_required(player_id: int, options: Array, choose_count: int, context: Dictionary)
 signal position_selection_required(player_id: int, valid_positions: Array, context: Dictionary)
+signal immediate_control_required(champion_id: String, controller_player_id: int)
+signal intel_choice_required(caster_owner_id: int, own_top_card: String, opp_top_card: String)
+signal discard_choice_required(player_id: int, count: int)
 
 var game_state: GameState
 
 # Pending discard selection context
 var _pending_discard_caster: String = ""
 var _pending_discard_damage: int = 0
+
+# Pending discard choice context (Introspection-style: player chooses which cards to discard)
+var _pending_discard_choice_player: int = -1
+var _pending_discard_choice_count: int = 0
+
+# Pending Intel choice context
+var _pending_intel_caster_owner: int = -1
 
 # Damage source tracking for effects like adjacentToSource (Spell Punish)
 var _damage_source_id: String = ""
@@ -30,6 +41,12 @@ var _pending_choice_context: Dictionary = {}  # Stores context when waiting for 
 var _pending_position_context: Dictionary = {}  # Stores context when waiting for position
 var _current_x_value: int = 0  # Currently resolved X value for card processing
 
+# Damage tracking for cards like Black Hole that heal based on damage dealt
+var _card_damage_dealt: int = 0  # Total damage dealt during current card processing
+
+# Draw tracking for Hypocrite's "match" draw value
+var _last_player_draw_count: Dictionary = {1: 0, 2: 0}  # Track extra cards drawn per player
+
 
 func set_damage_source(source_id: String) -> void:
 	"""Set the damage source for effects that need it."""
@@ -39,6 +56,21 @@ func set_damage_source(source_id: String) -> void:
 func clear_damage_source() -> void:
 	"""Clear the damage source after effect resolution."""
 	_damage_source_id = ""
+
+
+func get_card_damage_dealt() -> int:
+	"""Get total damage dealt during current card processing (for damageDealt heal value)."""
+	return _card_damage_dealt
+
+
+func _reset_card_damage_tracking() -> void:
+	"""Reset damage tracking at start of card processing."""
+	_card_damage_dealt = 0
+
+
+func _add_card_damage_dealt(amount: int) -> void:
+	"""Add to damage dealt tracking during card processing."""
+	_card_damage_dealt += amount
 
 
 # --- X Variable System ---
@@ -207,6 +239,9 @@ func process_card(card_name: String, caster: ChampionState, targets: Array) -> D
 	if card_data.is_empty():
 		return {"success": false, "error": "Card not found"}
 
+	# Reset damage tracking for this card (used by damageDealt heal value)
+	_reset_card_damage_tracking()
+
 	# Check for cards that need special handling
 	var special_result := _handle_special_card(card_name, caster, targets, card_data)
 	if not special_result.is_empty():
@@ -223,12 +258,19 @@ func process_card(card_name: String, caster: ChampionState, targets: Array) -> D
 		"success": true,
 		"card": card_name,
 		"caster": caster.unique_id,
-		"effects": results
+		"effects": results,
+		"total_damage_dealt": _card_damage_dealt
 	}
 
 
-func _handle_special_card(card_name: String, caster: ChampionState, targets: Array, _card_data: Dictionary) -> Dictionary:
+func _handle_special_card(card_name: String, caster: ChampionState, targets: Array, card_data: Dictionary) -> Dictionary:
 	"""Handle cards that need special processing beyond standard effects."""
+	# First check for card-level customHandler
+	var custom_handler: String = card_data.get("customHandler", "")
+	if not custom_handler.is_empty():
+		return _process_custom({"type": "custom", "name": custom_handler}, caster, targets, card_data)
+
+	# Then check for specific cards by name
 	match card_name:
 		"Bear Tank":
 			return _handle_bear_tank(caster, targets)
@@ -318,6 +360,28 @@ func complete_discard_selection(discarded_cards: Array[String]) -> Dictionary:
 	}
 
 
+func complete_intel_choice(own_to_bottom: bool, opp_to_bottom: bool) -> void:
+	"""Complete the Intel card choice — move cards to bottom as chosen."""
+	if _pending_intel_caster_owner < 0:
+		return
+	var owner_id := _pending_intel_caster_owner
+	var opp_id := 2 if owner_id == 1 else 1
+	var own_deck := game_state.get_deck(owner_id)
+	var opp_deck := game_state.get_deck(opp_id)
+
+	if own_to_bottom and not own_deck.is_empty():
+		var card: String = own_deck.pop_front()
+		own_deck.push_back(card)
+		print("Intel: Put own deck's %s on bottom" % card)
+
+	if opp_to_bottom and not opp_deck.is_empty():
+		var card: String = opp_deck.pop_front()
+		opp_deck.push_back(card)
+		print("Intel: Put opponent's %s on bottom" % card)
+
+	_pending_intel_caster_owner = -1
+
+
 func _process_single_effect(effect: Dictionary, caster: ChampionState, targets: Array, card_data: Dictionary) -> Dictionary:
 	"""Process a single effect from the card's effect array."""
 	var result := {"type": "unknown", "success": false}
@@ -325,10 +389,10 @@ func _process_single_effect(effect: Dictionary, caster: ChampionState, targets: 
 	# Get effect type - cards.json uses "type" field
 	var effect_type: String = str(effect.get("type", ""))
 
-	# For self-targeting cards, ensure caster is included in targets
+	# For self-targeting cards or cards with no target, ensure caster is included in targets
 	var effective_targets := targets
 	var card_target_type: String = str(card_data.get("target", "")).to_lower()
-	if card_target_type == "self" and effective_targets.is_empty():
+	if (card_target_type == "self" or card_target_type == "none" or card_target_type == "") and effective_targets.is_empty():
 		effective_targets = [caster.unique_id]
 
 	# Check conditions before processing effect
@@ -351,7 +415,7 @@ func _process_single_effect(effect: Dictionary, caster: ChampionState, targets: 
 		"damage":
 			result = _process_damage(effect, caster, effective_targets, card_data)
 		"heal":
-			result = _process_heal(effect, caster, effective_targets)
+			result = _process_heal(effect, caster, effective_targets, card_data)
 		"statmod":
 			result = _process_stat_mod(effect, caster, effective_targets)
 		"buff":
@@ -359,7 +423,7 @@ func _process_single_effect(effect: Dictionary, caster: ChampionState, targets: 
 		"debuff":
 			result = _process_debuff(effect, caster, effective_targets)
 		"move":
-			result = _process_move(effect, caster, effective_targets)
+			result = _process_move(effect, caster, effective_targets, card_data)
 		"draw":
 			result = _process_draw(effect, caster, effective_targets)
 		"discard":
@@ -372,6 +436,8 @@ func _process_single_effect(effect: Dictionary, caster: ChampionState, targets: 
 			result = _process_lock_mana(effect, caster)
 		"stealmana":
 			result = _process_steal_mana(effect, caster)
+		"control":
+			result = _process_control(effect, caster, effective_targets)
 		_:
 			# Fallback: check for old-style keys for backwards compatibility
 			if effect.has("damage"):
@@ -394,10 +460,21 @@ func _process_damage(effect: Dictionary, caster: ChampionState, targets: Array, 
 	var scope: String = str(effect.get("scope", "target"))
 	var card_range: String = str(card_data.get("range", ""))
 	var effect_range: String = str(effect.get("range", ""))
+	var target_type: String = str(card_data.get("target", ""))
+	var scope_lower := scope.to_lower()
 
 	# Handle AOE random damage (e.g., Rain of Arrows)
 	if scope == "random" and (card_range == "AOE" or effect_range == "AOE"):
 		return _process_aoe_random_damage(damage_value, caster, targets, card_data)
+
+	# Handle position-targeted AOE damage (e.g., Acid Bomb, Black Hole)
+	# This is when scope is "all" and target is "position" with AOE range
+	if (scope_lower == "all" or scope_lower == "allchamps") and target_type == "position" and card_range == "AOE":
+		return _process_position_aoe_damage(damage_value, caster, targets, card_data)
+
+	# Handle direction-targeted damage (e.g., Ground Pound - damage all in a direction)
+	if target_type == "direction" and (scope_lower == "all" or card_range == "LOS"):
+		return _process_direction_damage(damage_value, caster, targets, card_data)
 
 	var actual_targets := _resolve_targets(scope, caster, targets, card_range)
 	var total_damage := 0
@@ -406,6 +483,7 @@ func _process_damage(effect: Dictionary, caster: ChampionState, targets: Array, 
 		var amount := _calculate_damage(damage_value, caster, target)
 		var dealt := target.take_damage(amount)
 		total_damage += dealt
+		_add_card_damage_dealt(dealt)  # Track for damageDealt heal value
 		damage_dealt.emit(caster.unique_id, target.unique_id, dealt)
 		if dealt > 0:
 			EventBus.champion_damaged.emit(target.unique_id, dealt, caster.champion_name)
@@ -469,6 +547,7 @@ func _process_aoe_random_damage(damage_value, caster: ChampionState, targets: Ar
 		var random_target: ChampionState = champions_in_aoe[randi() % champions_in_aoe.size()]
 		var dealt := random_target.take_damage(1)
 		dealt_damage += dealt
+		_add_card_damage_dealt(dealt)  # Track for damageDealt heal value
 		damage_dealt.emit(caster.unique_id, random_target.unique_id, dealt)
 		if dealt > 0:
 			EventBus.champion_damaged.emit(random_target.unique_id, dealt, caster.champion_name)
@@ -486,6 +565,108 @@ func _process_aoe_random_damage(damage_value, caster: ChampionState, targets: Ar
 		"total_damage": dealt_damage,
 		"target_count": champions_in_aoe.size(),
 		"distribution": damage_distribution
+	}
+
+
+func _process_position_aoe_damage(damage_value, caster: ChampionState, targets: Array, card_data: Dictionary) -> Dictionary:
+	"""Handle AOE damage centered on a target position (e.g., Acid Bomb).
+	Deals damage to ALL champions (friendly and enemy) within AOE radius of the position."""
+	var aoe_radius: int = card_data.get("aoeRadius", 1)  # Default AOE radius
+
+	# Find the target position from targets array
+	var target_pos: Vector2i = Vector2i(-999, -999)  # Invalid sentinel
+	var found_position := false
+	if targets.size() > 0:
+		var first_target = targets[0]
+		if first_target is Vector2i:
+			target_pos = first_target
+			found_position = true
+		elif first_target is String:
+			# Try to parse as "x,y" format
+			var parts: PackedStringArray = first_target.split(",")
+			if parts.size() == 2:
+				target_pos = Vector2i(int(parts[0]), int(parts[1]))
+				found_position = true
+
+	if not found_position:
+		print("EffectProcessor: Position AOE damage - no valid target position in targets: %s" % [targets])
+		return {"type": "damage", "success": false, "error": "No target position"}
+
+	print("EffectProcessor: Position AOE target: %s, radius: %d" % [target_pos, aoe_radius])
+
+	# Find ALL champions within AOE range of target position (both friendly and enemy)
+	var champions_in_aoe: Array[ChampionState] = []
+	for champ: ChampionState in game_state.get_all_champions():
+		if champ.is_alive():
+			var dist: int = maxi(absi(champ.position.x - target_pos.x), absi(champ.position.y - target_pos.y))
+			if dist <= aoe_radius:
+				champions_in_aoe.append(champ)
+				print("EffectProcessor: %s at %s is in AOE (dist=%d)" % [champ.champion_name, champ.position, dist])
+
+	if champions_in_aoe.is_empty():
+		print("EffectProcessor: Position AOE damage - no champions in range of position %s" % target_pos)
+		return {"type": "damage", "success": true, "total_damage": 0, "target_count": 0}
+
+	# Deal damage to each target
+	var total_damage := 0
+	var damage_amount := _calculate_damage(damage_value, caster, caster)
+
+	for target: ChampionState in champions_in_aoe:
+		var dealt := target.take_damage(damage_amount)
+		total_damage += dealt
+		_add_card_damage_dealt(dealt)  # Track for damageDealt heal value
+		damage_dealt.emit(caster.unique_id, target.unique_id, dealt)
+		if dealt > 0:
+			EventBus.champion_damaged.emit(target.unique_id, dealt, caster.champion_name)
+
+	print("EffectProcessor: Position AOE damage - dealt %d total to %d champions" % [total_damage, champions_in_aoe.size()])
+
+	return {
+		"type": "damage",
+		"success": true,
+		"total_damage": total_damage,
+		"target_count": champions_in_aoe.size()
+	}
+
+
+func _process_direction_damage(damage_value, caster: ChampionState, targets: Array, _card_data: Dictionary) -> Dictionary:
+	"""Handle direction-targeted damage (e.g., Ground Pound - damage all in a line)."""
+	# Get direction from targets
+	var direction: String = ""
+	if targets.size() > 0:
+		direction = str(targets[0]).to_lower()
+
+	if direction.is_empty() or direction not in ["up", "down", "left", "right"]:
+		print("EffectProcessor: Direction damage - invalid direction: %s" % direction)
+		return {"type": "damage", "success": false, "error": "Invalid direction"}
+
+	print("EffectProcessor: Direction damage - direction=%s from %s" % [direction, caster.position])
+
+	# Get all champions in that direction
+	var champions_in_line := _get_champions_in_direction(caster, direction)
+
+	if champions_in_line.is_empty():
+		print("EffectProcessor: Direction damage - no champions in direction %s" % direction)
+		return {"type": "damage", "success": true, "total_damage": 0, "target_count": 0}
+
+	# Deal damage to each champion in the line
+	var total_damage := 0
+	var damage_amount := _calculate_damage(damage_value, caster, caster)
+
+	for target: ChampionState in champions_in_line:
+		var dealt := target.take_damage(damage_amount)
+		total_damage += dealt
+		_add_card_damage_dealt(dealt)  # Track for damageDealt heal value
+		damage_dealt.emit(caster.unique_id, target.unique_id, dealt)
+		if dealt > 0:
+			EventBus.champion_damaged.emit(target.unique_id, dealt, caster.champion_name)
+		print("EffectProcessor: Direction damage - %s took %d damage" % [target.champion_name, dealt])
+
+	return {
+		"type": "damage",
+		"success": true,
+		"total_damage": total_damage,
+		"target_count": champions_in_line.size()
 	}
 
 
@@ -563,11 +744,20 @@ func _calculate_damage(damage_value, caster: ChampionState, _target: ChampionSta
 
 # --- Heal Processing ---
 
-func _process_heal(effect: Dictionary, caster: ChampionState, targets: Array) -> Dictionary:
+func _process_heal(effect: Dictionary, caster: ChampionState, targets: Array, card_data: Dictionary = {}) -> Dictionary:
 	# Support both new format (value) and old format (heal)
 	var heal_value = effect.get("value", effect.get("heal", 0))
 	var scope: String = str(effect.get("scope", "target"))
 	var condition: Dictionary = effect.get("condition", {})
+	var card_range: String = str(card_data.get("range", ""))
+	var target_type: String = str(card_data.get("target", ""))
+
+	# Handle position-targeted AOE healing (e.g., Healing Rain)
+	var scope_lower := scope.to_lower()
+	if (scope_lower == "all" or scope_lower == "allchamps") and target_type == "position" and card_range == "AOE":
+		print("EffectProcessor: Position AOE heal detected - heal_value=%s (type=%s), scope=%s" % [heal_value, typeof(heal_value), scope])
+		return _process_position_aoe_heal(heal_value, caster, targets, card_data)
+
 	var actual_targets := _resolve_targets(scope, caster, targets)
 	var total_healed := 0
 
@@ -588,6 +778,68 @@ func _process_heal(effect: Dictionary, caster: ChampionState, targets: Array) ->
 		"type": "heal",
 		"success": true,
 		"total_healed": total_healed
+	}
+
+
+func _process_position_aoe_heal(heal_value, caster: ChampionState, targets: Array, card_data: Dictionary) -> Dictionary:
+	"""Handle AOE healing centered on a target position (e.g., Healing Rain).
+	Heals ALL champions within AOE radius of the position."""
+	var aoe_radius: int = card_data.get("aoeRadius", 1)
+
+	# Find the target position from targets array
+	var target_pos: Vector2i = Vector2i(-999, -999)
+	var found_position := false
+	if targets.size() > 0:
+		var first_target = targets[0]
+		if first_target is Vector2i:
+			target_pos = first_target
+			found_position = true
+		elif first_target is String:
+			var parts: PackedStringArray = first_target.split(",")
+			if parts.size() == 2:
+				target_pos = Vector2i(int(parts[0]), int(parts[1]))
+				found_position = true
+
+	if not found_position:
+		print("EffectProcessor: Position AOE heal - no valid target position in targets: %s" % [targets])
+		return {"type": "heal", "success": false, "error": "No target position"}
+
+	print("EffectProcessor: Position AOE heal at %s, radius: %d" % [target_pos, aoe_radius])
+
+	# Find ALL champions within AOE range of target position
+	var champions_in_aoe: Array[ChampionState] = []
+	for champ: ChampionState in game_state.get_all_champions():
+		if champ.is_alive():
+			var dist: int = maxi(absi(champ.position.x - target_pos.x), absi(champ.position.y - target_pos.y))
+			if dist <= aoe_radius:
+				champions_in_aoe.append(champ)
+				print("EffectProcessor: %s at %s is in heal AOE (dist=%d)" % [champ.champion_name, champ.position, dist])
+
+	if champions_in_aoe.is_empty():
+		print("EffectProcessor: Position AOE heal - no champions in range of position %s" % target_pos)
+		return {"type": "heal", "success": true, "total_healed": 0}
+
+	# Heal each target
+	var total_healed := 0
+	print("EffectProcessor: About to calculate heal - heal_value=%s (type=%s)" % [heal_value, typeof(heal_value)])
+	var heal_amount := _calculate_heal(heal_value, caster, caster)
+	print("EffectProcessor: Position AOE heal amount calculated: %d" % heal_amount)
+
+	for target: ChampionState in champions_in_aoe:
+		print("EffectProcessor: Healing %s (HP: %d/%d, noHeal: %s)" % [target.champion_name, target.current_hp, target.max_hp, target.has_debuff("noHeal")])
+		var healed := target.heal(heal_amount)
+		total_healed += healed
+		healing_done.emit(caster.unique_id, target.unique_id, healed)
+		if healed > 0:
+			EventBus.champion_healed.emit(target.unique_id, healed, caster.champion_name)
+
+	print("EffectProcessor: Position AOE heal - healed %d total to %d champions" % [total_healed, champions_in_aoe.size()])
+
+	return {
+		"type": "heal",
+		"success": true,
+		"total_healed": total_healed,
+		"target_count": champions_in_aoe.size()
 	}
 
 
@@ -689,10 +941,14 @@ func _check_effect_condition(condition: Dictionary, caster: ChampionState, targe
 
 func _calculate_heal(heal_value, caster: ChampionState, target: ChampionState) -> int:
 	"""Calculate heal amount from various formats."""
-	if heal_value is int:
-		return heal_value
+	# Handle numeric types (JSON may parse numbers as float)
+	if heal_value is int or heal_value is float:
+		return int(heal_value)
 	elif heal_value is String:
 		match heal_value:
+			"damageDealt":
+				# Heal for damage dealt by this card (for Black Hole, etc.)
+				return _card_damage_dealt
 			"damageTaken":
 				# Heal for damage taken LAST turn (for Second Wind, etc.)
 				return target.damage_taken_last_turn
@@ -874,6 +1130,10 @@ func _process_buff(effect: Dictionary, caster: ChampionState, targets: Array) ->
 		stacks = 1  # Default to 1 stack if value is boolean true
 	var scope: String = str(effect.get("scope", "target"))
 
+	# Handle terrain-creating buffs (target is a position, not a champion)
+	if buff_name == "createWall":
+		return _process_create_wall(targets, scope)
+
 	var actual_targets := _resolve_targets(scope, caster, targets)
 	var duration_value := _parse_duration(duration)
 
@@ -886,6 +1146,11 @@ func _process_buff(effect: Dictionary, caster: ChampionState, targets: Array) ->
 
 		# Special handling for buffs that need game_state access
 		match buff_name:
+			"gainMana":
+				# Jackpot - immediately grant mana to the buff target's owner
+				game_state.add_mana(target.owner_id, stacks)
+				extra_data["mana_granted"] = stacks
+				print("%s gained %d mana (Jackpot/gainMana buff)" % [target.champion_name, stacks])
 			"createPits":
 				# Pit of Despair - create temporary pits around the Dark Wizard
 				var pit_positions := game_state.create_pits_around(target.position)
@@ -913,13 +1178,65 @@ func _process_buff(effect: Dictionary, caster: ChampionState, targets: Array) ->
 	}
 
 
+func _process_create_wall(targets: Array, scope: String) -> Dictionary:
+	"""Handle Spirit Wall - create temporary walls at target position and optionally adjacent tiles."""
+	# Extract target position from targets array
+	var target_pos: Vector2i = Vector2i(-999, -999)
+	var found_position := false
+
+	if targets.size() > 0:
+		var first_target = targets[0]
+		if first_target is Vector2i:
+			target_pos = first_target
+			found_position = true
+		elif first_target is String:
+			var parts: PackedStringArray = first_target.split(",")
+			if parts.size() == 2:
+				target_pos = Vector2i(int(parts[0]), int(parts[1]))
+				found_position = true
+
+	if not found_position:
+		print("EffectProcessor: createWall - no valid target position")
+		return {"type": "buff", "success": false, "error": "No target position"}
+
+	var wall_positions: Array[Vector2i] = []
+
+	# scope "adjacent" means target + all adjacent tiles
+	if scope.to_lower() == "adjacent":
+		wall_positions = game_state.create_walls_at_and_around(target_pos)
+	else:
+		# Just the target position
+		if game_state.is_valid_position(target_pos):
+			var terrain := game_state.get_terrain(target_pos)
+			if terrain == GameState.Terrain.EMPTY:
+				var occupant := game_state.get_champion_at(target_pos)
+				if occupant == null:
+					game_state.set_temporary_terrain(target_pos, GameState.Terrain.WALL)
+					wall_positions.append(target_pos)
+
+	print("EffectProcessor: Spirit Wall created %d walls at/around %s" % [wall_positions.size(), target_pos])
+
+	return {
+		"type": "buff",
+		"success": true,
+		"buff": "createWall",
+		"wall_positions": wall_positions,
+		"walls_created": wall_positions.size()
+	}
+
+
 # --- Debuff Processing ---
 
 func _process_debuff(effect: Dictionary, caster: ChampionState, targets: Array) -> Dictionary:
 	# cards.json uses "name" for debuff name: {"type": "debuff", "name": "canAttack", "value": false, "duration": "thisTurn"}
 	var debuff_name: String = str(effect.get("name", effect.get("debuff", "")))
 	var duration: String = str(effect.get("duration", "permanent"))
-	var stacks: int = _to_int(effect.get("stacks", effect.get("value", 1)))
+	var raw_value = effect.get("stacks", effect.get("value", 1))
+	var stacks: int
+	if raw_value is String and str(raw_value).to_upper() == "X":
+		stacks = _current_x_value
+	else:
+		stacks = _to_int(raw_value)
 	if stacks == 0:
 		stacks = 1  # Default to 1 stack if value is boolean false
 	var scope: String = str(effect.get("scope", "target"))
@@ -942,12 +1259,20 @@ func _process_debuff(effect: Dictionary, caster: ChampionState, targets: Array) 
 
 # --- Move Processing ---
 
-func _process_move(effect: Dictionary, caster: ChampionState, targets: Array) -> Dictionary:
+func _process_move(effect: Dictionary, caster: ChampionState, targets: Array, card_data: Dictionary = {}) -> Dictionary:
 	# cards.json uses "value" for move type: {"type": "move", "value": "overWall"}
 	var move_type: String = str(effect.get("value", effect.get("move", "")))
 	var scope: String = str(effect.get("scope", "target"))
+	var scope_lower := scope.to_lower()
 	var movement_bonus: int = _to_int(effect.get("bonus", 0))
-	var actual_targets := _resolve_targets(scope, caster, targets)
+	var card_range: String = str(card_data.get("range", ""))
+	var target_type: String = str(card_data.get("target", ""))
+
+	# Handle position-targeted AOE movement (e.g., Light Bomb - push all away from target position)
+	if (scope_lower == "all" or scope_lower == "allchamps") and target_type == "position" and card_range == "AOE":
+		return _process_position_aoe_move(move_type, caster, targets, card_data)
+
+	var actual_targets := _resolve_targets(scope, caster, targets, card_range)
 	var moves_done := 0
 
 	# Handle "immediate" move type - requires player input
@@ -992,6 +1317,141 @@ func _process_move(effect: Dictionary, caster: ChampionState, targets: Array) ->
 	}
 
 
+func _process_control(effect: Dictionary, caster: ChampionState, targets: Array) -> Dictionary:
+	"""Process mind control effect - allows caster's player to move and attack with target enemy."""
+	var control_type: String = str(effect.get("value", "moveAndAttack"))
+	var target_ids: Array = []
+
+	for target_id in targets:
+		var target: ChampionState = null
+		if target_id is ChampionState:
+			target = target_id
+		else:
+			target = game_state.get_champion(str(target_id))
+
+		if target == null or not target.is_alive():
+			continue
+
+		# Reset target's action flags so they can move and attack
+		target.has_moved = false
+		target.has_attacked = false
+		target.movement_remaining = target.current_movement
+		target_ids.append(target.unique_id)
+
+	if target_ids.is_empty():
+		return {"type": "control", "success": false, "reason": "no_valid_targets"}
+
+	# Signal that mind control is required - the controller is the caster's owner
+	var controller_player_id: int = caster.owner_id
+	for tid: String in target_ids:
+		immediate_control_required.emit(tid, controller_player_id)
+
+	return {
+		"type": "control",
+		"success": true,
+		"control_type": control_type,
+		"pending_control": true,
+		"champion_ids": target_ids,
+		"controller_player_id": controller_player_id
+	}
+
+
+func _process_position_aoe_move(move_type: String, caster: ChampionState, targets: Array, card_data: Dictionary) -> Dictionary:
+	"""Handle position-targeted AOE movement (e.g., Light Bomb - push all away from target position)."""
+	var aoe_radius: int = card_data.get("aoeRadius", 1)
+
+	# Find the target position from targets array
+	var target_pos: Vector2i = Vector2i(-999, -999)
+	var found_position := false
+	if targets.size() > 0:
+		var first_target = targets[0]
+		if first_target is Vector2i:
+			target_pos = first_target
+			found_position = true
+		elif first_target is String:
+			var parts: PackedStringArray = first_target.split(",")
+			if parts.size() == 2:
+				target_pos = Vector2i(int(parts[0]), int(parts[1]))
+				found_position = true
+
+	if not found_position:
+		print("EffectProcessor: Position AOE move - no valid target position")
+		return {"type": "move", "success": false, "error": "No target position"}
+
+	print("EffectProcessor: Position AOE move at %s, type=%s, radius=%d" % [target_pos, move_type, aoe_radius])
+
+	# Find ALL champions within AOE range (excluding the caster for "all other champions")
+	var champions_in_aoe: Array[ChampionState] = []
+	for champ: ChampionState in game_state.get_all_champions():
+		if champ.is_alive() and champ.unique_id != caster.unique_id:
+			var dist: int = maxi(absi(champ.position.x - target_pos.x), absi(champ.position.y - target_pos.y))
+			# Include all champions within AOE radius (excluding caster)
+			if dist <= aoe_radius:
+				champions_in_aoe.append(champ)
+
+	if champions_in_aoe.is_empty():
+		print("EffectProcessor: Position AOE move - no champions in range")
+		return {"type": "move", "success": true, "moves_done": 0}
+
+	var moves_done := 0
+
+	for champ: ChampionState in champions_in_aoe:
+		var new_pos: Vector2i = _calculate_push_from_position(target_pos, champ, move_type)
+		if new_pos != champ.position:
+			var old_pos: Vector2i = champ.position
+			champ.position = new_pos
+			champion_moved.emit(champ.unique_id, old_pos, new_pos)
+			moves_done += 1
+			print("EffectProcessor: Pushed %s from %s to %s" % [champ.champion_name, old_pos, new_pos])
+
+	return {
+		"type": "move",
+		"success": true,
+		"move_type": move_type,
+		"moves_done": moves_done
+	}
+
+
+func _calculate_push_from_position(source_pos: Vector2i, target: ChampionState, move_type: String) -> Vector2i:
+	"""Calculate where to push a champion from a source position."""
+	var dir := Vector2i(
+		signi(target.position.x - source_pos.x),
+		signi(target.position.y - source_pos.y)
+	)
+
+	# If champion is at same position (shouldn't happen for AOE), don't move
+	if dir == Vector2i.ZERO:
+		return target.position
+
+	match move_type:
+		"toWall":
+			# Push until hitting a wall or board edge
+			var current := target.position
+			var max_push := 10  # Safety limit
+			for _i in range(max_push):
+				var next := current + dir
+				if not game_state.is_walkable(next):
+					break
+				current = next
+			return current
+		"away":
+			# Push one tile
+			var next := target.position + dir
+			if game_state.is_walkable(next):
+				return next
+		"awayTwo":
+			# Push two tiles
+			var current := target.position
+			for _j in range(2):
+				var next := current + dir
+				if not game_state.is_walkable(next):
+					break
+				current = next
+			return current
+
+	return target.position
+
+
 func _calculate_move_destination(move_type: String, caster: ChampionState, target: ChampionState) -> Vector2i:
 	"""Calculate destination based on move type."""
 	var pathfinder := Pathfinder.new(game_state)
@@ -1031,8 +1491,39 @@ func _calculate_move_destination(move_type: String, caster: ChampionState, targe
 			var adjacent := pathfinder.get_empty_adjacent_tiles(target.position, true)
 			if not adjacent.is_empty():
 				return adjacent[randi() % adjacent.size()]
+		"LOS":
+			# Move to a random empty position in line of sight from caster (Distract)
+			return _find_los_destination(caster, target)
 
 	return target.position
+
+
+func _find_los_destination(caster: ChampionState, target: ChampionState) -> Vector2i:
+	"""Find an empty position in line of sight from caster to move target to."""
+	var valid_positions: Array[Vector2i] = []
+	var directions := [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]
+
+	# Check each cardinal direction from caster
+	for dir: Vector2i in directions:
+		var pos := caster.position + dir
+		while game_state.is_valid_position(pos):
+			var terrain := game_state.get_terrain(pos)
+			if terrain == GameState.Terrain.WALL:
+				break  # Stop at walls
+
+			# Check if position is walkable and empty
+			if game_state.is_walkable(pos):
+				var occupant := game_state.get_champion_at(pos)
+				if occupant == null or occupant.unique_id == target.unique_id:
+					valid_positions.append(pos)
+
+			pos += dir
+
+	if valid_positions.is_empty():
+		return target.position  # No valid LOS positions
+
+	# Pick a random valid position (AI could be smarter about this)
+	return valid_positions[randi() % valid_positions.size()]
 
 
 func _find_over_wall_destination(target: ChampionState, caster: ChampionState) -> Vector2i:
@@ -1244,17 +1735,31 @@ func _find_safest_tile(target: ChampionState) -> Vector2i:
 
 func _process_draw(effect: Dictionary, caster: ChampionState, _targets: Array) -> Dictionary:
 	# cards.json uses "value" for draw count
-	var draw_count: int = _to_int(effect.get("value", effect.get("draw", 1)))
-	if draw_count == 0:
-		draw_count = 1  # Default to drawing 1 card
+	var draw_value = effect.get("value", effect.get("draw", 1))
+	var draw_count: int = 0
 
-	# Check for condition object which may contain from/filter/maxCost
+	# Check for condition object which may contain from/filter/maxCost/scale
 	var condition: Dictionary = effect.get("condition", {})
+
+	# Handle special "match" value for Hypocrite (draw same as opponent)
+	if draw_value is String and draw_value == "match":
+		var scale: String = condition.get("scale", "")
+		if scale == "oppDraw":
+			# Draw the same number as opponent drew last
+			var opp_id := 2 if caster.owner_id == 1 else 1
+			draw_count = _last_player_draw_count.get(opp_id, 0)
+			if draw_count <= 0:
+				return {"type": "draw", "success": true, "cards_drawn": 0}
+	else:
+		draw_count = _to_int(draw_value)
+		if draw_count == 0:
+			draw_count = 1  # Default to drawing 1 card
+
 	var from: String = str(effect.get("from", condition.get("from", "deck")))
 	var filter: String = str(effect.get("filter", condition.get("filter", "")))
 	var max_cost: int = condition.get("maxCost", -1)  # -1 means no limit
 
-	var cards_drawn: Array[String] = []
+	var drawn_cards: Array[String] = []
 
 	for i in range(draw_count):
 		var drawn := ""
@@ -1268,12 +1773,23 @@ func _process_draw(effect: Dictionary, caster: ChampionState, _targets: Array) -
 				drawn = _draw_from_discard(opp_id, filter, max_cost)
 
 		if not drawn.is_empty():
-			cards_drawn.append(drawn)
+			drawn_cards.append(drawn)
+
+	# Track this player's draw count for Hypocrite's "match" effect
+	if drawn_cards.size() > 0:
+		_last_player_draw_count[caster.owner_id] = drawn_cards.size()
+
+	# Emit signal for effect tracking
+	if drawn_cards.size() > 0:
+		effect_applied.emit("draw", caster.unique_id, "", drawn_cards.size())
+		# Emit cards_drawn signal for onDraw triggers (Hypocrite, etc.)
+		# This is "extra" drawing (from card effects, not start of turn)
+		cards_drawn.emit(caster.owner_id, drawn_cards.size(), true)
 
 	return {
 		"type": "draw",
 		"success": true,
-		"cards_drawn": cards_drawn.size()
+		"cards_drawn": drawn_cards.size()
 	}
 
 
@@ -1319,7 +1835,9 @@ func _card_matches_filter(card_name: String, filter: String) -> bool:
 	if card_data.is_empty():
 		return false
 
-	match filter.to_lower():
+	var filter_lower := filter.to_lower()
+
+	match filter_lower:
 		"action":
 			return card_data.get("type") == "Action"
 		"response":
@@ -1329,9 +1847,14 @@ func _card_matches_filter(card_name: String, filter: String) -> bool:
 		_:
 			# Check if filter is a champion name
 			var card_champion: String = card_data.get("character", "")
-			if card_champion.to_lower() == filter.to_lower():
+			if card_champion.to_lower() == filter_lower:
 				return true
-			# Unknown filter, match all
+
+			# Check if filter is a substring of card name (e.g., "Flask" matches "Stealth Flask")
+			if card_name.to_lower().contains(filter_lower):
+				return true
+
+			# Unknown filter - match none if filter is specified
 			return filter.is_empty()
 
 
@@ -1345,12 +1868,26 @@ func _process_discard(effect: Dictionary, caster: ChampionState, _targets: Array
 	var target_player: String = str(effect.get("targetPlayer", "self"))
 	var random: bool = effect.get("random", false)
 
-	var player_id := caster.owner_id
+	var pid := caster.owner_id
 	if target_player == "opponent":
-		player_id = 2 if caster.owner_id == 1 else 1
+		pid = 2 if caster.owner_id == 1 else 1
 
-	var hand := game_state.get_hand(player_id)
-	var discard := game_state.get_discard(player_id)
+	var hand := game_state.get_hand(pid)
+
+	# Player-choice discard: if discarding from own hand and not random, let player choose
+	if not random and target_player != "opponent" and hand.size() > discard_count:
+		_pending_discard_choice_player = pid
+		_pending_discard_choice_count = mini(discard_count, hand.size())
+		discard_choice_required.emit(pid, _pending_discard_choice_count)
+		return {
+			"type": "discard",
+			"success": true,
+			"pending_discard_choice": true,
+			"count": _pending_discard_choice_count
+		}
+
+	# Auto-discard (random, opponent, or hand too small to choose)
+	var discard := game_state.get_discard(pid)
 	var discarded := 0
 
 	for i in range(mini(discard_count, hand.size())):
@@ -1368,6 +1905,25 @@ func _process_discard(effect: Dictionary, caster: ChampionState, _targets: Array
 		"success": true,
 		"discarded": discarded
 	}
+
+
+func complete_discard_choice(chosen_cards: Array[String]) -> void:
+	"""Complete player-chosen discard (Introspection, etc.)."""
+	if _pending_discard_choice_player < 0:
+		return
+	var pid := _pending_discard_choice_player
+	var hand := game_state.get_hand(pid)
+	var discard := game_state.get_discard(pid)
+
+	for card_name: String in chosen_cards:
+		var idx := hand.find(card_name)
+		if idx >= 0:
+			hand.remove_at(idx)
+			discard.append(card_name)
+			print("Discard choice: %s discarded" % card_name)
+
+	_pending_discard_choice_player = -1
+	_pending_discard_choice_count = 0
 
 
 # --- Mana Effects ---
@@ -1789,17 +2345,49 @@ func _handle_control_enemy(caster: ChampionState, targets: Array) -> Dictionary:
 
 
 func _handle_manipulate_deck(caster: ChampionState, effect: Dictionary) -> Dictionary:
-	"""Deck manipulation effects (look at top cards, reorder, etc.)."""
-	var action: String = effect.get("action", "look")
+	"""Deck manipulation effects (look at top cards, reorder, etc.).
+	For Intel: look at both decks, optionally put top card on bottom."""
+	var action: String = effect.get("action", "intel")  # Default to intel behavior
 	var count: int = effect.get("count", 1)
-	var deck := game_state.get_deck(caster.owner_id)
+	var own_deck := game_state.get_deck(caster.owner_id)
+	var opp_id := 2 if caster.owner_id == 1 else 1
+	var opp_deck := game_state.get_deck(opp_id)
 
 	match action:
+		"intel":
+			# Intel: Look at top of both decks, let player/AI choose top or bottom
+			var own_top: String = own_deck[0] if not own_deck.is_empty() else ""
+			var opp_top: String = opp_deck[0] if not opp_deck.is_empty() else ""
+
+			if own_top.is_empty() and opp_top.is_empty():
+				# Both decks empty, nothing to do
+				return {
+					"type": "custom",
+					"custom": "manipulateDeck",
+					"success": true,
+					"action": "intel",
+					"own_top": "",
+					"opp_top": ""
+				}
+
+			# Store context and emit signal for player/AI choice
+			_pending_intel_caster_owner = caster.owner_id
+			intel_choice_required.emit(caster.owner_id, own_top, opp_top)
+
+			return {
+				"type": "custom",
+				"custom": "manipulateDeck",
+				"success": true,
+				"action": "intel",
+				"pending_intel": true,
+				"own_top": own_top,
+				"opp_top": opp_top
+			}
 		"look":
-			# Look at top N cards
+			# Look at top N cards of own deck
 			var top_cards: Array = []
-			for i in range(mini(count, deck.size())):
-				top_cards.append(deck[i])
+			for i in range(mini(count, own_deck.size())):
+				top_cards.append(own_deck[i])
 			return {
 				"type": "custom",
 				"custom": "manipulateDeck",
@@ -1808,7 +2396,7 @@ func _handle_manipulate_deck(caster: ChampionState, effect: Dictionary) -> Dicti
 				"cards": top_cards
 			}
 		"shuffle":
-			deck.shuffle()
+			own_deck.shuffle()
 			return {
 				"type": "custom",
 				"custom": "manipulateDeck",
@@ -1817,9 +2405,9 @@ func _handle_manipulate_deck(caster: ChampionState, effect: Dictionary) -> Dicti
 			}
 		"putBottom":
 			# Put top card on bottom
-			if not deck.is_empty():
-				var card: String = deck.pop_front()
-				deck.push_back(card)
+			if not own_deck.is_empty():
+				var card: String = own_deck.pop_front()
+				own_deck.push_back(card)
 			return {
 				"type": "custom",
 				"custom": "manipulateDeck",
@@ -1929,8 +2517,9 @@ func _resolve_targets(scope: String, caster: ChampionState, explicit_targets: Ar
 			var opp_id := 2 if caster.owner_id == 1 else 1
 			for champ: ChampionState in game_state.get_champions(opp_id):
 				if champ.is_alive():
-					# If card has "range": "self", filter by caster's attack range
-					if card_range == "self":
+					# If card has "range": "self" or "AOE", filter by caster's attack range
+					# AOE melee attacks only hit enemies within the caster's range
+					if card_range == "self" or card_range == "AOE":
 						if _is_in_attack_range(caster, champ):
 							targets.append(champ)
 					else:

@@ -157,6 +157,11 @@ const BUFFS: Dictionary = {
 		"stackable": false,
 		"description": "Steal mana from opponent"
 	},
+	"bonusMana": {
+		"category": BuffCategory.SPECIAL,
+		"stackable": true,
+		"description": "Gain bonus mana at turn start"
+	},
 	"spectreEssence": {
 		"category": BuffCategory.SPECIAL,
 		"stackable": false,

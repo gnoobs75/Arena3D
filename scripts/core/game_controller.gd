@@ -273,6 +273,11 @@ func cast_card(card_name: String, caster_id: String, targets: Array = []) -> Dic
 	if card_data.is_empty():
 		return {"success": false, "error": "Card not found"}
 
+	# CRITICAL: Champions can only cast their own cards
+	var card_character: String = card_data.get("character", "")
+	if not card_character.is_empty() and card_character != caster.champion_name:
+		return {"success": false, "error": "%s cannot cast %s's card '%s'" % [caster.champion_name, card_character, card_name]}
+
 	var card_type: String = card_data.get("type", "")
 
 	# Handle equipment cards specially
@@ -311,6 +316,18 @@ func _execute_cast(action: ActionSystem.CastCardAction, targets: Array) -> Dicti
 		var cost: int = card_data.get("cost", 0)
 		if cost > 0:
 			EventBus.mana_spent.emit(caster.owner_id, cost, action.card_name)
+
+		# Check for X-cost cards — need player input before processing effects
+		if card_data.get("hasXCost", false):
+			effect_processor.request_x_value(caster.owner_id, action.card_name, caster, targets, card_data)
+			return {
+				"success": true,
+				"action": "cast",
+				"card": action.card_name,
+				"caster": action.caster_id,
+				"targets": targets,
+				"pending_x_value": true
+			}
 
 		# Process card effects
 		var effect_result := effect_processor.process_card(
@@ -614,6 +631,8 @@ func _try_auto_cast_from_slot(player_id: int, trigger: String, context: Dictiona
 	if slot_card.is_empty():
 		return {"cast": false}
 
+	print("GameController: Checking auto-cast for player %d, slot card '%s', trigger '%s'" % [player_id, slot_card, trigger])
+
 	var card_data := CardDatabase.get_card(slot_card)
 	if card_data.is_empty():
 		return {"cast": false}
@@ -621,6 +640,7 @@ func _try_auto_cast_from_slot(player_id: int, trigger: String, context: Dictiona
 	# Verify the card's trigger matches
 	var card_trigger: String = card_data.get("trigger", "")
 	if card_trigger != trigger:
+		print("GameController: Trigger mismatch - card has '%s', event is '%s'" % [card_trigger, trigger])
 		return {"cast": false}
 
 	# Check mana cost
@@ -650,6 +670,7 @@ func _try_auto_cast_from_slot(player_id: int, trigger: String, context: Dictiona
 	var effect_result := effect_processor.process_card(slot_card, caster, targets)
 
 	# Move card from slot to discard
+	print("GameController: AUTO-CASTING '%s' from player %d slot (trigger: %s)" % [slot_card, player_id, trigger])
 	game_state.discard_response_slot(player_id)
 
 	# Emit signal for UI feedback

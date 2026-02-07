@@ -49,6 +49,10 @@ var matchup_statistics: Dictionary = {}
 var high_noop_cards: Array[Dictionary] = []  # Cards with >20% no-op rate
 var total_card_plays: int = 0
 var total_noop_plays: int = 0
+var total_success_plays: int = 0
+
+## Successful cards analysis
+var successful_cards: Array[Dictionary] = []  # Cards with >70% success rate
 
 ## Balance indicators
 var win_rate_by_champion: Dictionary = {}  # champion_name -> win_rate
@@ -70,6 +74,7 @@ func _init() -> void:
 	pair_statistics = {}
 	matchup_statistics = {}
 	high_noop_cards = []
+	successful_cards = []
 	win_rate_by_champion = {}
 	most_impactful_cards = []
 	least_impactful_cards = []
@@ -140,8 +145,10 @@ func to_dict() -> Dictionary:
 		"noop_analysis": {
 			"total_card_plays": total_card_plays,
 			"total_noop_plays": total_noop_plays,
+			"total_success_plays": total_success_plays,
 			"overall_noop_rate": overall_noop_rate,
-			"high_noop_cards": high_noop_cards
+			"high_noop_cards": high_noop_cards,
+			"successful_cards": successful_cards
 		},
 		"balance_indicators": {
 			"win_rate_by_champion": win_rate_by_champion,
@@ -189,6 +196,22 @@ func to_console_summary() -> String:
 			var rate: float = win_rate_by_champion[champ]
 			var bar := _make_bar(rate, 20)
 			lines.append("  %s: %s %.1f%%" % [champ.substr(0, 12).rpad(12), bar, rate * 100])
+		lines.append("")
+
+	# Successful cards
+	if not successful_cards.is_empty():
+		lines.append("SUCCESSFUL CARDS (>70%% success rate)")
+		lines.append("-" .repeat(70))
+		lines.append("  %-20s | %s | %s | %s | %s" % ["Card", "Played", "Success", "Rate", "Effects"])
+		lines.append("  " + "-" .repeat(75))
+		for card: Dictionary in successful_cards.slice(0, 10):
+			lines.append("  %-20s | %6d | %6d | %5.1f%% | %s" % [
+				str(card.get("card_name", "?")).substr(0, 20),
+				card.get("times_played", 0),
+				card.get("success_count", 0),
+				card.get("success_rate", 0) * 100,
+				str(card.get("effects_summary", "")).substr(0, 20)
+			])
 		lines.append("")
 
 	# No-op cards
@@ -286,9 +309,13 @@ static func load_from_file(path: String) -> SessionReport:
 	var noop: Dictionary = data.get("noop_analysis", {})
 	report.total_card_plays = noop.get("total_card_plays", 0)
 	report.total_noop_plays = noop.get("total_noop_plays", 0)
+	report.total_success_plays = noop.get("total_success_plays", 0)
 	report.high_noop_cards = []
 	for card_data in noop.get("high_noop_cards", []):
 		report.high_noop_cards.append(card_data)
+	report.successful_cards = []
+	for card_data in noop.get("successful_cards", []):
+		report.successful_cards.append(card_data)
 
 	# Balance indicators
 	var balance: Dictionary = data.get("balance_indicators", {})

@@ -15,6 +15,7 @@ const MARGIN := 10
 const TOP_BAR_HEIGHT := 160  # Height for AI hand area
 const SIDE_PANEL_WIDTH := 220  # Narrower side panels
 const PORTRAIT_HEIGHT := 200  # Smaller portraits
+const BOTTOM_BAR_HEIGHT := 200  # Hand UI height (increased for larger cards)
 
 # UI Elements
 var player1_panel: Control
@@ -83,22 +84,23 @@ func _create_ui() -> void:
 	player1_panel.position = Vector2(MARGIN, TOP_BAR_HEIGHT + MARGIN)
 	add_child(player1_panel)
 
-	# === RIGHT SIDE PANEL (Player 2) ===
+	# === RIGHT SIDE PANEL (Player 2) - below turn info ===
 	player2_panel = _create_side_panel(2)
 	player2_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	player2_panel.offset_left = -SIDE_PANEL_WIDTH - MARGIN
 	player2_panel.offset_right = -MARGIN
-	player2_panel.offset_top = TOP_BAR_HEIGHT + MARGIN
-	player2_panel.offset_bottom = TOP_BAR_HEIGHT + MARGIN + _get_side_panel_height()
+	var turn_info_height := 80
+	player2_panel.offset_top = TOP_BAR_HEIGHT + MARGIN + turn_info_height + MARGIN
+	player2_panel.offset_bottom = TOP_BAR_HEIGHT + MARGIN + turn_info_height + MARGIN + _get_side_panel_height()
 	add_child(player2_panel)
 
-	# === TURN INFO BAR (floating, center-right) ===
+	# === TURN INFO BAR (above right side panel) ===
 	turn_info_container = _create_turn_info_bar()
 	turn_info_container.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	turn_info_container.offset_left = -400
-	turn_info_container.offset_right = -SIDE_PANEL_WIDTH - MARGIN - 10
+	turn_info_container.offset_left = -SIDE_PANEL_WIDTH - MARGIN
+	turn_info_container.offset_right = -MARGIN
 	turn_info_container.offset_top = TOP_BAR_HEIGHT + MARGIN
-	turn_info_container.offset_bottom = TOP_BAR_HEIGHT + MARGIN + 90
+	turn_info_container.offset_bottom = TOP_BAR_HEIGHT + MARGIN + 80
 	add_child(turn_info_container)
 
 	# === CARD PREVIEW POPUP (hidden by default) ===
@@ -150,6 +152,106 @@ func _create_ui() -> void:
 	combat_log_button.pressed.connect(_on_combat_log_button_pressed)
 	_style_button(combat_log_button, Color(0.3, 0.35, 0.4))
 	add_child(combat_log_button)
+
+
+var _dev_wrappers: Array[DraggableWrapper] = []
+
+
+func enable_developer_layout() -> void:
+	"""Enable draggable/resizable panels for Developer Mode.
+	Call after _create_ui() has run (after _ready)."""
+	var side_h := _get_side_panel_height()
+	var tb := DraggableWrapper.TITLE_BAR_HEIGHT
+
+	# For anchor-based panels, we must use DraggableWrapper.wrap() with explicit positions
+	# since wrap_existing can't reliably read anchor-resolved positions.
+
+	# === AI Hand (top bar) ===
+	var ai_pos := Vector2(0, 0)
+	var ai_size := Vector2(1920, TOP_BAR_HEIGHT + tb)
+	_rewrap_panel(ai_hand_panel, "ai_hand", "AI Hand", ai_pos, ai_size)
+
+	# === Player 1 sidebar ===
+	var p1_pos := Vector2(MARGIN, TOP_BAR_HEIGHT + MARGIN)
+	var p1_size := Vector2(SIDE_PANEL_WIDTH, side_h + tb)
+	_rewrap_panel(player1_panel, "p1_panel", "Player 1", p1_pos, p1_size)
+
+	# === Player 2 sidebar ===
+	var turn_info_height := 80
+	var p2_pos := Vector2(1920 - SIDE_PANEL_WIDTH - MARGIN, TOP_BAR_HEIGHT + MARGIN + turn_info_height + MARGIN)
+	var p2_size := Vector2(SIDE_PANEL_WIDTH, side_h + tb)
+	_rewrap_panel(player2_panel, "p2_panel", "Player 2", p2_pos, p2_size)
+
+	# === Turn Info ===
+	var ti_pos := Vector2(1920 - SIDE_PANEL_WIDTH - MARGIN, TOP_BAR_HEIGHT + MARGIN)
+	var ti_size := Vector2(SIDE_PANEL_WIDTH, turn_info_height + tb)
+	_rewrap_panel(turn_info_container, "turn_info", "Turn Info", ti_pos, ti_size)
+
+	# === Combat Log ===
+	var cl_pos := Vector2(MARGIN, 1080 - CombatLogPanel.PANEL_HEIGHT - MARGIN)
+	var cl_size := Vector2(CombatLogPanel.PANEL_WIDTH, CombatLogPanel.PANEL_HEIGHT + tb)
+	_rewrap_panel(combat_log_panel, "combat_log", "Combat Log", cl_pos, cl_size)
+	combat_log_panel.visible = true
+
+	# === Add Reset Layout button ===
+	var reset_btn := Button.new()
+	reset_btn.text = "Reset Layout"
+	reset_btn.custom_minimum_size = Vector2(100, 28)
+	reset_btn.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	reset_btn.offset_left = 10
+	reset_btn.offset_top = 4
+	reset_btn.offset_right = 110
+	reset_btn.offset_bottom = 32
+	reset_btn.pressed.connect(_on_reset_layout_pressed)
+	reset_btn.z_index = 100
+	var btn_style := StyleBoxFlat.new()
+	btn_style.bg_color = Color(0.35, 0.2, 0.2)
+	btn_style.border_color = Color(0.6, 0.3, 0.3)
+	btn_style.set_border_width_all(1)
+	btn_style.set_corner_radius_all(3)
+	reset_btn.add_theme_stylebox_override("normal", btn_style)
+	var btn_hover := StyleBoxFlat.new()
+	btn_hover.bg_color = Color(0.45, 0.25, 0.25)
+	btn_hover.border_color = Color(0.7, 0.4, 0.4)
+	btn_hover.set_border_width_all(1)
+	btn_hover.set_corner_radius_all(3)
+	reset_btn.add_theme_stylebox_override("hover", btn_hover)
+	reset_btn.add_theme_font_size_override("font_size", 12)
+	reset_btn.add_theme_color_override("font_color", Color(0.9, 0.8, 0.8))
+	add_child(reset_btn)
+
+	print("GameHUD: Developer layout enabled — all panels are draggable and resizable")
+
+
+func _rewrap_panel(panel: Control, id: String, display_name: String, default_pos: Vector2, default_size: Vector2) -> void:
+	"""Remove a panel from its current parent and wrap it in a DraggableWrapper."""
+	var parent := panel.get_parent()
+	if parent:
+		parent.remove_child(panel)
+
+	# Clear anchor-based positioning
+	panel.anchor_left = 0
+	panel.anchor_top = 0
+	panel.anchor_right = 0
+	panel.anchor_bottom = 0
+	panel.offset_left = 0
+	panel.offset_top = 0
+	panel.offset_right = 0
+	panel.offset_bottom = 0
+
+	var wrapper := DraggableWrapper.wrap(panel, id, display_name, default_pos, default_size)
+	add_child(wrapper)
+	_dev_wrappers.append(wrapper)
+
+
+func _on_reset_layout_pressed() -> void:
+	"""Reset all panels to default positions."""
+	if DevLayout:
+		DevLayout.clear_all()
+	for wrapper in _dev_wrappers:
+		if is_instance_valid(wrapper):
+			wrapper.restore_default()
+	print("GameHUD: Layout reset to defaults")
 
 
 func _get_side_panel_height() -> float:
@@ -567,15 +669,28 @@ func _update_side_panel(panel: Control, player_id: int) -> void:
 	if vbox == null:
 		return
 
-	# Update mana gems
+	# Update mana gems (dynamically add bonus gems beyond 5)
 	var header: HBoxContainer = vbox.get_child(0) as HBoxContainer
 	if header:
 		var gems: HBoxContainer = header.get_node_or_null("ManaGems")
 		if gems:
-			for i in range(MAX_MANA):
-				var gem: ManaGem = gems.get_node_or_null("Gem%d" % i)
+			var total_gems_needed := maxi(MAX_MANA, mana)
+			# Add extra gems if needed
+			while gems.get_child_count() < total_gems_needed:
+				var gem := ManaGem.new()
+				gem.name = "Gem%d" % gems.get_child_count()
+				gem.is_bonus = true
+				gems.add_child(gem)
+			# Remove extra empty gems if mana dropped back
+			while gems.get_child_count() > maxi(MAX_MANA, mana):
+				var last := gems.get_child(gems.get_child_count() - 1)
+				gems.remove_child(last)
+				last.queue_free()
+			for i in range(gems.get_child_count()):
+				var gem: ManaGem = gems.get_child(i) as ManaGem
 				if gem:
 					gem.set_filled(i < mana)
+					gem.is_bonus = i >= MAX_MANA
 
 	# Update info label
 	var info_label: Label = vbox.get_node_or_null("InfoLabel")
@@ -797,6 +912,7 @@ func _on_combat_log_button_pressed() -> void:
 
 class ManaGem extends Control:
 	var is_filled: bool = true
+	var is_bonus: bool = false
 
 	func _init() -> void:
 		custom_minimum_size = Vector2(22, 22)
@@ -816,23 +932,42 @@ class ManaGem extends Control:
 		draw_circle(center, radius, Color(0.1, 0.1, 0.15))
 
 		if is_filled:
-			# Filled gem - gradient effect with concentric circles
-			var outer_color := VisualTheme.GRADIENT_MANA_FILLED_BOTTOM
-			var inner_color := VisualTheme.GRADIENT_MANA_FILLED_TOP
-			var mid_color := outer_color.lerp(inner_color, 0.5)
+			if is_bonus:
+				# Bonus gem - gold/amber color to distinguish from normal mana
+				var outer_color := Color(0.6, 0.45, 0.1)
+				var inner_color := Color(1.0, 0.85, 0.3)
+				var mid_color := outer_color.lerp(inner_color, 0.5)
 
-			draw_circle(center, radius - 1.5, outer_color)
-			draw_circle(center, radius - 3, mid_color)
-			draw_circle(center, radius - 5, inner_color)
+				draw_circle(center, radius - 1.5, outer_color)
+				draw_circle(center, radius - 3, mid_color)
+				draw_circle(center, radius - 5, inner_color)
 
-			# Shine highlights
-			draw_circle(center + Vector2(-2.5, -2.5), 2.5, Color(0.7, 0.9, 1.0, 0.5))
-			draw_circle(center + Vector2(2, 3), 1.5, Color(0.5, 0.7, 1.0, 0.25))
+				# Shine highlights (gold tint)
+				draw_circle(center + Vector2(-2.5, -2.5), 2.5, Color(1.0, 0.95, 0.6, 0.5))
+				draw_circle(center + Vector2(2, 3), 1.5, Color(0.9, 0.8, 0.3, 0.25))
 
-			# Outer glow
-			for i in range(3, 0, -1):
-				var glow_alpha := 0.1 * (1.0 - float(i) / 3.0)
-				draw_arc(center, radius + i, 0, TAU, 24, Color(0.4, 0.6, 1.0, glow_alpha), 1.5)
+				# Outer glow (gold)
+				for i in range(3, 0, -1):
+					var glow_alpha := 0.12 * (1.0 - float(i) / 3.0)
+					draw_arc(center, radius + i, 0, TAU, 24, Color(1.0, 0.8, 0.2, glow_alpha), 1.5)
+			else:
+				# Normal filled gem - gradient effect with concentric circles
+				var outer_color := VisualTheme.GRADIENT_MANA_FILLED_BOTTOM
+				var inner_color := VisualTheme.GRADIENT_MANA_FILLED_TOP
+				var mid_color := outer_color.lerp(inner_color, 0.5)
+
+				draw_circle(center, radius - 1.5, outer_color)
+				draw_circle(center, radius - 3, mid_color)
+				draw_circle(center, radius - 5, inner_color)
+
+				# Shine highlights
+				draw_circle(center + Vector2(-2.5, -2.5), 2.5, Color(0.7, 0.9, 1.0, 0.5))
+				draw_circle(center + Vector2(2, 3), 1.5, Color(0.5, 0.7, 1.0, 0.25))
+
+				# Outer glow
+				for i in range(3, 0, -1):
+					var glow_alpha := 0.1 * (1.0 - float(i) / 3.0)
+					draw_arc(center, radius + i, 0, TAU, 24, Color(0.4, 0.6, 1.0, glow_alpha), 1.5)
 		else:
 			# Empty gem - recessed/inset look
 			var outer_color := VisualTheme.GRADIENT_MANA_EMPTY_BOTTOM
@@ -858,15 +993,23 @@ class ChampionPortrait extends Control:
 	var _portrait_texture: Texture2D = null
 
 	const WIDTH := 200
-	const HEIGHT := 210  # Slightly taller for better spacing
+	const HEIGHT := 210  # Base height without equipment
+	const EQUIP_ROW_HEIGHT := 18.0
+	const MAX_EQUIP_DISPLAY := 3
 	const CHARACTER_ART_PATH := "res://assets/art/characters/"
 
 	func _init() -> void:
 		custom_minimum_size = Vector2(WIDTH, HEIGHT)
 
+	func _get_equipment_height() -> float:
+		if champion == null or champion.equipment.is_empty():
+			return 0.0
+		var count := mini(champion.equipment.size(), MAX_EQUIP_DISPLAY)
+		return 16.0 + count * EQUIP_ROW_HEIGHT  # label + rows
+
 	func _process(delta: float) -> void:
 		_glow_timer += delta * 3.0
-		if _is_selected or (champion and not champion.buffs.is_empty()):
+		if _is_selected or (champion and (not champion.buffs.is_empty() or not champion.equipment.is_empty())):
 			queue_redraw()
 
 	func set_selected(selected: bool) -> void:
@@ -881,7 +1024,11 @@ class ChampionPortrait extends Control:
 			_base_range = champ.base_range
 			_base_movement = champ.base_movement
 			_load_portrait_texture()
+		_update_size()
 		queue_redraw()
+
+	func _update_size() -> void:
+		custom_minimum_size = Vector2(WIDTH, HEIGHT + _get_equipment_height())
 
 	func _load_portrait_texture() -> void:
 		"""Load the portrait texture for this champion."""
@@ -1003,6 +1150,35 @@ class ChampionPortrait extends Control:
 		_draw_stat(font, 8, y, stat_w, "PWR", champion.current_power, _base_power, Color(0.85, 0.3, 0.25), is_alive)
 		_draw_stat(font, 8 + stat_w + stat_gap, y, stat_w, "RNG", champion.current_range, _base_range, Color(0.3, 0.55, 0.85), is_alive)
 		_draw_stat(font, 8 + (stat_w + stat_gap) * 2, y, stat_w, "MOV", champion.current_movement, _base_movement, Color(0.3, 0.75, 0.4), is_alive)
+
+		# Equipment section
+		if not champion.equipment.is_empty() and is_alive:
+			y += 40  # below stats
+			var equip_label_col := Color(0.7, 0.6, 0.3)
+			VisualTheme.draw_text_shadow(self, font, Vector2(10, y + 10), "EQUIPPED", 9, equip_label_col)
+			y += 14
+			var equip_count := 0
+			for card_name: String in champion.equipment:
+				if equip_count >= MAX_EQUIP_DISPLAY:
+					break
+				var equip_data: Dictionary = champion.equipment[card_name]
+				var charges_rem: int = equip_data.get("charges_remaining", 0)
+				var charges_max: int = equip_data.get("charges_max", 0)
+				var charge_text: String
+				if charges_max < 0 or charges_rem < 0:
+					charge_text = "∞"
+				else:
+					charge_text = "%d/%d" % [charges_rem, charges_max]
+				# Equipment icon dot
+				draw_circle(Vector2(14, y + 7), 3.0, Color(0.8, 0.7, 0.3))
+				# Name (truncated)
+				var display_name: String = card_name if card_name.length() <= 16 else card_name.left(14) + ".."
+				VisualTheme.draw_text_shadow(self, font, Vector2(20, y + 11), display_name, 9, Color(0.85, 0.85, 0.9))
+				# Charges on right
+				VisualTheme.draw_text_shadow(self, font, Vector2(w - 36, y + 11), charge_text, 9, Color(0.7, 0.6, 0.3))
+				y += EQUIP_ROW_HEIGHT
+				equip_count += 1
+			_update_size()
 
 		# Death overlay
 		if not is_alive:

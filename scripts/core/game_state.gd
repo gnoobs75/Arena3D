@@ -613,6 +613,24 @@ func create_pits_around(center_pos: Vector2i) -> Array[Vector2i]:
 	return pit_positions
 
 
+func create_walls_at_and_around(center_pos: Vector2i) -> Array[Vector2i]:
+	"""Create temporary walls at a position and all adjacent tiles (for Spirit Wall)."""
+	var wall_positions: Array[Vector2i] = []
+
+	# Include center and all 8 adjacent tiles
+	for dx in range(-1, 2):
+		for dy in range(-1, 2):
+			var pos := Vector2i(center_pos.x + dx, center_pos.y + dy)
+			# Only create wall on empty tiles with no champion present
+			if is_valid_position(pos) and board_terrain[pos.y][pos.x] == Terrain.EMPTY:
+				var occupant := get_champion_at(pos)
+				if occupant == null:
+					set_temporary_terrain(pos, Terrain.WALL)
+					wall_positions.append(pos)
+
+	return wall_positions
+
+
 # --- Win Condition ---
 
 func check_win_condition() -> void:

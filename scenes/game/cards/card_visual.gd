@@ -7,8 +7,8 @@ signal card_clicked(card_name: String)
 signal card_hovered(card_name: String)
 signal card_unhovered(card_name: String)
 
-const HOVER_LIFT := 30
-const HOVER_SCALE := 1.05
+const HOVER_LIFT := 20
+const HOVER_SCALE := 1.02
 const CHARACTER_ART_PATH := "res://assets/art/characters/"
 
 # UI overlay colors

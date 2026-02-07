@@ -1,12 +1,14 @@
 extends Control
 class_name SplashScreen
-## SplashScreen - Title screen with 2D/3D mode selection
+## SplashScreen - Title screen with 2D/3D/Developer mode selection
 
 signal mode_selected(use_3d: bool)
+signal developer_mode_selected()
 
 @onready var background: TextureRect = $Background
 @onready var button_2d: Button = $ButtonContainer/Button2D
 @onready var button_3d: Button = $ButtonContainer/Button3D
+@onready var button_dev: Button = $ButtonContainer/ButtonDev
 @onready var title_label: Label = $TitleLabel
 
 
@@ -19,10 +21,12 @@ func _ready() -> void:
 	# Connect buttons
 	button_2d.pressed.connect(_on_2d_pressed)
 	button_3d.pressed.connect(_on_3d_pressed)
+	button_dev.pressed.connect(_on_dev_pressed)
 
 	# Style the buttons
 	_style_button(button_2d, Color(0.15, 0.2, 0.15), Color(0.4, 0.7, 0.4))
 	_style_button(button_3d, Color(0.15, 0.12, 0.25), Color(0.5, 0.4, 0.7))
+	_style_button(button_dev, Color(0.25, 0.18, 0.12), Color(0.8, 0.55, 0.3))
 
 
 func _style_button(button: Button, bg_color: Color, border_color: Color) -> void:
@@ -60,3 +64,7 @@ func _on_2d_pressed() -> void:
 
 func _on_3d_pressed() -> void:
 	mode_selected.emit(true)
+
+
+func _on_dev_pressed() -> void:
+	developer_mode_selected.emit()

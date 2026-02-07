@@ -825,11 +825,8 @@
     "image": "Betrayal.png",
     "target": "enemy",
     "effect": [
-      {"type": "move", "value": "immediate"},
-      {"type": "attack", "value": "immediate"}
+      {"type": "control", "value": "moveAndAttack", "duration": "immediate"}
     ],
-    "effectOrder": [0, 1],
-    "targetSelection": "player",
     "requiresAlive": true
   },
   {
@@ -1115,15 +1112,15 @@
     "character": "Burglar",
     "name": "Pick Pocket",
     "Number in Deck": 2,
-    "type": "Action",
-    "description": "At the end of your opponent’s turn, steal one empty gem. You may use it on your next turn.",
+    "type": "Response",
+    "description": "At the end of your opponent's turn, gain an extra mana crystal. Start your next turn with 6 mana.",
     "cost": 0,
     "image": "PickPocket.png",
     "target": "none",
+    "trigger": "endTurn",
     "effect": [
-      {"type": "buff", "name": "stealMana", "value": 1, "duration": "nextTurn"}
-    ],
-    "applyWhen": "endTurn"
+      {"type": "buff", "name": "bonusMana", "value": 1, "duration": "nextTurn"}
+    ]
   },
   {
     "character": "Burglar",
@@ -1718,15 +1715,15 @@
       "name": "Guess Again",
       "Number in Deck": 2,
       "type": "Action",
-      "description": "Until your next turn, your opponent cannot cast spells that cost X or less.",
+      "description": "Until your next turn, your opponent cannot cast spells that cost X or less. Pay additional mana to increase X.",
       "cost": 1,
       "image": "GuessAgain.png",
       "target": "none",
+      "hasXCost": true,
       "effect": [
         {"type": "debuff", "name": "maxCastCost", "value": "X", "duration": "nextTurn", "scope": "enemies"}
       ],
-      "range": "global",
-      "conditionValue": 2
+      "range": "global"
     },
     {
       "character": "Illusionist",

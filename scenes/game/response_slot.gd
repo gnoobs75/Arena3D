@@ -15,8 +15,8 @@ var card_visual: CardVisual = null
 var game_state: GameState = null
 
 # Visual settings
-const SLOT_WIDTH := 120
-const SLOT_HEIGHT := 170
+const SLOT_WIDTH := 145
+const SLOT_HEIGHT := 195
 const BORDER_WIDTH := 3
 
 
@@ -72,14 +72,18 @@ func _update_card_visual() -> void:
 
 	card_visual.setup(slotted_card, true)
 	card_visual.card_clicked.connect(_on_card_clicked)
+	# Ensure card visual stops mouse events from propagating to the slot itself
+	card_visual.mouse_filter = Control.MOUSE_FILTER_STOP
 
 	queue_redraw()
 
 
 func _on_card_clicked(_card_name: String) -> void:
-	"""Handle clicking the slotted card - remove it."""
+	"""Handle clicking the slotted card - remove it and return to hand."""
+	print("ResponseSlot: Card clicked in slot: %s" % slotted_card)
 	if not slotted_card.is_empty():
 		var removed := slotted_card
+		print("ResponseSlot: Emitting card_removed signal for: %s" % removed)
 		card_removed.emit(removed)
 
 

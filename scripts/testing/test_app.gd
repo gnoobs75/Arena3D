@@ -517,6 +517,19 @@ func _show_headless_results(report: SessionReport) -> void:
 	print("  Avg Rounds: %.1f" % report.avg_rounds_per_match)
 	print("")
 
+	# Successful cards
+	if not report.successful_cards.is_empty():
+		print("SUCCESSFUL CARDS (>70%% success rate)")
+		for card: Dictionary in report.successful_cards.slice(0, 8):
+			print("  %-18s %3d plays, %3d success (%.0f%%) - %s" % [
+				str(card.get("card_name", "?")).substr(0, 18),
+				card.get("times_played", 0),
+				card.get("success_count", 0),
+				card.get("success_rate", 0) * 100,
+				str(card.get("effects_summary", ""))
+			])
+		print("")
+
 	# No-ops
 	if not report.high_noop_cards.is_empty():
 		print("NO-OP CARDS (cast but did nothing)")

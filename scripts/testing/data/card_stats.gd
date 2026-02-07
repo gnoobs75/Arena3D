@@ -24,8 +24,14 @@ var times_played_p2: int = 0
 ## Times the card was a no-op (cast but had no effect)
 var noop_count: int = 0
 
+## Times the card was successful (had expected effect)
+var success_count: int = 0
+
 ## Reasons for no-ops (reason_code -> count)
 var noop_reasons: Dictionary = {}
+
+## Success effect types (effect_type -> count) e.g., {"damage": 5, "heal": 3}
+var success_effects: Dictionary = {}
 
 ## Total damage dealt by this card
 var total_damage_dealt: int = 0
@@ -79,6 +85,7 @@ func _init(name: String = "", champ: String = "", type: String = "") -> void:
 	champion = champ
 	card_type = type
 	noop_reasons = {}
+	success_effects = {}
 
 
 ## No-op rate as percentage (0.0 to 1.0)
@@ -87,6 +94,14 @@ var noop_rate: float:
 		if times_played == 0:
 			return 0.0
 		return float(noop_count) / float(times_played)
+
+
+## Success rate as percentage (0.0 to 1.0)
+var success_rate: float:
+	get:
+		if times_played == 0:
+			return 0.0
+		return float(success_count) / float(times_played)
 
 
 ## Win rate when this card is played (0.0 to 1.0)
@@ -138,6 +153,28 @@ func record_noop(reason: String) -> void:
 	if not noop_reasons.has(reason):
 		noop_reasons[reason] = 0
 	noop_reasons[reason] += 1
+
+
+func record_success(effects: Array[String]) -> void:
+	"""Record that the card was successful with specific effects."""
+	success_count += 1
+	for effect: String in effects:
+		if not success_effects.has(effect):
+			success_effects[effect] = 0
+		success_effects[effect] += 1
+
+
+func get_success_summary() -> String:
+	"""Get a summary of what effects this card successfully applies."""
+	if success_effects.is_empty():
+		return ""
+	var parts: Array[String] = []
+	# Sort by count descending
+	var sorted_effects: Array = success_effects.keys()
+	sorted_effects.sort_custom(func(a, b): return success_effects[b] < success_effects[a])
+	for effect: String in sorted_effects.slice(0, 3):  # Top 3 effects
+		parts.append("%s(%d)" % [effect, success_effects[effect]])
+	return ", ".join(parts)
 
 
 func record_effect(damage: int, healing: int, buffs: int, debuffs: int, moves: int, draws: int) -> void:
@@ -229,6 +266,9 @@ func to_dict() -> Dictionary:
 		"noop_count": noop_count,
 		"noop_rate": noop_rate,
 		"noop_reasons": noop_reasons,
+		"success_count": success_count,
+		"success_rate": success_rate,
+		"success_effects": success_effects,
 		"total_damage_dealt": total_damage_dealt,
 		"total_healing_done": total_healing_done,
 		"buffs_applied": buffs_applied,
@@ -266,6 +306,8 @@ static func from_dict(data: Dictionary) -> CardStats:
 	stats.times_played_p2 = data.get("times_played_p2", 0)
 	stats.noop_count = data.get("noop_count", 0)
 	stats.noop_reasons = data.get("noop_reasons", {})
+	stats.success_count = data.get("success_count", 0)
+	stats.success_effects = data.get("success_effects", {})
 	stats.total_damage_dealt = data.get("total_damage_dealt", 0)
 	stats.total_healing_done = data.get("total_healing_done", 0)
 	stats.buffs_applied = data.get("buffs_applied", 0)

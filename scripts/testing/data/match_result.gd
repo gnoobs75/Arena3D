@@ -214,6 +214,10 @@ class CardPlayRecord extends RefCounted:
 	var is_noop: bool = false
 	var noop_reason: String = ""
 
+	## Success tracking
+	var is_success: bool = false
+	var success_effects: Array[String] = []
+
 	## State tracking (optional, for debugging)
 	var state_before_hash: String = ""
 	var state_after_hash: String = ""
@@ -237,7 +241,9 @@ class CardPlayRecord extends RefCounted:
 			"movements_caused": movements_caused,
 			"cards_drawn": cards_drawn,
 			"is_noop": is_noop,
-			"noop_reason": noop_reason
+			"noop_reason": noop_reason,
+			"is_success": is_success,
+			"success_effects": success_effects
 		}
 
 
