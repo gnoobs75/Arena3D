@@ -205,7 +205,12 @@ func attack_champion(attacker_id: String, target_id: String) -> Dictionary:
 		"target": target_id,
 		"damage": damage
 	}):
-		# Response fired - pending action will be resolved after effects complete
+		# Response fired — check if already resolved synchronously
+		# (happens when immediate movement resolves during the signal chain)
+		if _pending_action_type.is_empty():
+			# Already resolved — return the result (attack executed or missed)
+			return {"success": true, "resolved_immediately": true}
+		# Still pending — will be resolved after async movement (UI interaction)
 		return {"success": true, "pending": true, "awaiting_response": true}
 
 	# No responses fired - clear pending and execute attack immediately
@@ -314,7 +319,9 @@ func cast_card(card_name: String, caster_id: String, targets: Array = []) -> Dic
 		"card": card_name,
 		"targets": targets
 	}):
-		# Response fired - pending action will be resolved after effects complete
+		# Response fired — check if already resolved synchronously
+		if _pending_action_type.is_empty():
+			return {"success": true, "resolved_immediately": true}
 		return {"success": true, "pending": true, "awaiting_response": true}
 
 	# No responses fired - clear pending and execute cast immediately

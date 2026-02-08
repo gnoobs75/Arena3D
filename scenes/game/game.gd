@@ -1719,8 +1719,8 @@ func _on_immediate_movement_required(champion_ids: Array, movement_bonus: int) -
 	if _pending_immediate_moves.is_empty():
 		print("No player 1 champions need immediate movement")
 		# All movements handled (AI-only or none) — resolve pending action
-		# Use call_deferred to avoid resolving during the trigger call stack
-		game_controller.call_deferred("resolve_immediate_movement")
+		# Direct call is safe since _pending_action is pre-stored before trigger fires
+		game_controller.resolve_immediate_movement()
 		return
 
 	# Start immediate movement UI for first human champion

@@ -458,7 +458,8 @@ func _execute_action(action: Dictionary, state: GameState) -> Dictionary:
 			var result := game_controller.attack_champion(attacker_id, target_id)
 
 			# Fire afterDamage trigger after successful attack
-			if result.get("success", false) and attacker and target:
+			# Skip if already resolved (e.g. Quick Instincts dodge resolved synchronously)
+			if result.get("success", false) and not result.get("resolved_immediately", false) and attacker and target:
 				_fire_trigger("afterDamage", {
 					"attacker": attacker_id,
 					"target": target_id,
@@ -1006,8 +1007,7 @@ func _on_immediate_movement_required(champion_ids: Array, _movement_bonus: int) 
 				game_controller.effect_processor.champion_moved.emit(champ.unique_id, old_pos, best_pos)
 
 	# Resolve the pending attack/cast after all movements complete
-	# Use call_deferred to avoid resolving during the trigger call stack
-	game_controller.call_deferred("resolve_immediate_movement")
+	game_controller.resolve_immediate_movement()
 
 
 func _on_discard_selection_required(player_id: int, _caster_id: String, _damage_per_card: int) -> void:
