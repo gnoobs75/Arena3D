@@ -368,7 +368,7 @@
     "name": "Quick Instincts",
     "Number in Deck": 2,
     "type": "Response",
-    "description": "Before combat damage is dealt, the Beast gains +2 movement and an immediate movement phase.",
+    "description": "Before damage is dealt, gain +2 movement and take an immediate movement phase. If the Beast moves out of the attacker's range, the attack misses.",
     "cost": 0,
     "image": "QuickInstincts.png",
     "target": "self",

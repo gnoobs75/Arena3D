@@ -191,21 +191,26 @@ func attack_champion(attacker_id: String, target_id: String) -> Dictionary:
 	var damage_context := {"is_aoe": false, "is_combat": true, "attacker": attacker}
 	damage = BuffRegistry.calculate_damage_modifier(target, damage, true, damage_context)
 
+	# Pre-store pending action so it's available during trigger processing
+	# (e.g. Quick Instincts immediate movement needs attacker_id for dodge AI)
+	_pending_action_type = "attack"
+	_pending_action = {
+		"attacker_id": attacker_id,
+		"target_id": target_id,
+		"action": action
+	}
+
 	if _check_trigger("beforeDamage", {
 		"attacker": attacker_id,
 		"target": target_id,
 		"damage": damage
 	}):
-		# Response window opened - store pending attack for after resolution
-		_pending_action_type = "attack"
-		_pending_action = {
-			"attacker_id": attacker_id,
-			"target_id": target_id,
-			"action": action
-		}
+		# Response fired - pending action will be resolved after effects complete
 		return {"success": true, "pending": true, "awaiting_response": true}
 
-	# Execute attack immediately (no responses)
+	# No responses fired - clear pending and execute attack immediately
+	_pending_action_type = ""
+	_pending_action = {}
 	return _execute_attack(action)
 
 
@@ -294,14 +299,27 @@ func cast_card(card_name: String, caster_id: String, targets: Array = []) -> Dic
 		clear_damage_context()
 		return {"success": false, "error": "Cannot cast card"}
 
+	# Pre-store pending action so it's available during trigger processing
+	_pending_action_type = "cast"
+	_pending_action = {
+		"card_name": card_name,
+		"caster_id": caster_id,
+		"targets": targets,
+		"action": action
+	}
+
 	# Check for onCast responses
 	if _check_trigger("onCast", {
 		"caster": caster_id,
 		"card": card_name,
 		"targets": targets
 	}):
+		# Response fired - pending action will be resolved after effects complete
 		return {"success": true, "pending": true, "awaiting_response": true}
 
+	# No responses fired - clear pending and execute cast immediately
+	_pending_action_type = ""
+	_pending_action = {}
 	return _execute_cast(action, targets)
 
 
@@ -594,24 +612,33 @@ func _handle_champion_death(champion_id: String, killer_id: String) -> void:
 
 func _check_trigger(trigger: String, context: Dictionary) -> bool:
 	"""Check triggers and auto-cast from response slots if applicable.
-	With the Response Slot system, responses are automatic - no window needed."""
+	With the Response Slot system, responses are automatic - no window needed.
+	Returns true for beforeDamage/onCast if a response fired, so the action
+	is stored as pending and goes through resolve logic (e.g. range re-check)."""
 	# Check both players' response slots (responding player first, then active player)
 	var responding_player := _get_responding_player_for_trigger(trigger, context)
 	var active := game_state.active_player
+	var any_cast := false
 
 	# Try responding player's slot first
 	var slot_result := _try_auto_cast_from_slot(responding_player, trigger, context)
 	if slot_result.get("cast", false):
 		print("Response card auto-cast from player %d slot: %s" % [responding_player, slot_result.get("card", "")])
+		any_cast = true
 
 	# Then try active player's slot (for triggers like endTurn/startTurn)
 	if responding_player != active:
 		slot_result = _try_auto_cast_from_slot(active, trigger, context)
 		if slot_result.get("cast", false):
 			print("Response card auto-cast from player %d slot: %s" % [active, slot_result.get("card", "")])
+			any_cast = true
 
-	# Response Slot system replaces the old window system
-	# No window needed - either the slot triggers or nothing happens
+	# For beforeDamage and onCast triggers, return true if a response fired
+	# so the action is stored as pending and resolved after effects complete
+	# (e.g. Quick Instincts immediate movement → range re-check)
+	if any_cast and trigger in ["beforeDamage", "onCast"]:
+		return true
+
 	return false
 
 
@@ -815,6 +842,13 @@ func _on_response_window_opened(trigger: String, context: Dictionary) -> void:
 
 func _on_response_window_closed() -> void:
 	response_window_closed.emit()
+
+
+func resolve_immediate_movement() -> void:
+	"""Called by game.gd after immediate movement completes.
+	Resolves the pending attack/cast now that movement is done."""
+	print("GameController: Resolving pending action after immediate movement")
+	_on_response_stack_resolved()
 
 
 func _on_response_stack_resolved() -> void:

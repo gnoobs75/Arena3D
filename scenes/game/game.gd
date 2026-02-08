@@ -1702,20 +1702,28 @@ func _on_immediate_movement_required(champion_ids: Array, movement_bonus: int) -
 	"""Handle immediate movement request from response cards."""
 	print("Immediate movement required for champions: %s (bonus: %d)" % [champion_ids, movement_bonus])
 
-	# Filter to only player 1's champions (AI handles its own)
 	var state := game_controller.get_game_state()
 	_pending_immediate_moves = []
 
+	# Handle AI champions first (auto-move them immediately)
 	for champ_id in champion_ids:
 		var champ := state.get_champion(str(champ_id))
-		if champ and champ.owner_id == 1:
+		if champ == null or not champ.is_alive():
+			continue
+		if champ.owner_id != 1:
+			# AI champion — auto-move away from attacker
+			_ai_handle_immediate_move(str(champ_id))
+		else:
 			_pending_immediate_moves.append(str(champ_id))
 
 	if _pending_immediate_moves.is_empty():
 		print("No player 1 champions need immediate movement")
+		# All movements handled (AI-only or none) — resolve pending action
+		# Use call_deferred to avoid resolving during the trigger call stack
+		game_controller.call_deferred("resolve_immediate_movement")
 		return
 
-	# Start immediate movement UI for first champion
+	# Start immediate movement UI for first human champion
 	_start_immediate_movement_for_next_champion()
 
 
@@ -1723,7 +1731,7 @@ func _start_immediate_movement_for_next_champion() -> void:
 	"""Start immediate movement UI for the next pending champion."""
 	var active_board = get_active_board()
 	if _pending_immediate_moves.is_empty():
-		# All immediate movements done - continue with response resolution
+		# All immediate movements done - resolve pending action
 		print("All immediate movements completed")
 		_immediate_move_champion_id = ""
 		input_mode = InputMode.SELECT_CHAMPION
@@ -1731,6 +1739,8 @@ func _start_immediate_movement_for_next_champion() -> void:
 			active_board.clear_highlights()
 			active_board.update_champion_positions()
 		_update_ui()
+		# Notify game_controller to resolve the pending attack/cast
+		game_controller.resolve_immediate_movement()
 		return
 
 	# Get next champion
@@ -1798,6 +1808,60 @@ func _try_immediate_move(position: Vector2i) -> void:
 
 	# Move to next champion or finish
 	_start_immediate_movement_for_next_champion()
+
+
+func _ai_handle_immediate_move(champion_id: String) -> void:
+	"""AI auto-moves a champion during immediate movement (e.g. Quick Instincts).
+	Moves the champion to the tile furthest from the attacker to dodge the attack."""
+	var state := game_controller.get_game_state()
+	var champ := state.get_champion(champion_id)
+	if champ == null or not champ.is_alive():
+		return
+
+	var pathfinder := Pathfinder.new(state)
+	var reachable := pathfinder.get_reachable_tiles(champ)
+	if reachable.is_empty():
+		print("AI immediate move: %s has no reachable tiles" % champ.champion_name)
+		return
+
+	# Find the attacker from the pending action context
+	var attacker_id: String = game_controller._pending_action.get("attacker_id", "")
+	var attacker := state.get_champion(attacker_id) if not attacker_id.is_empty() else null
+
+	var best_pos: Vector2i = champ.position
+	var best_dist: int = 0
+
+	if attacker:
+		# Move to the tile furthest from the attacker to try to dodge
+		for tile: Vector2i in reachable:
+			var dist: int = absi(tile.x - attacker.position.x) + absi(tile.y - attacker.position.y)
+			if dist > best_dist:
+				best_dist = dist
+				best_pos = tile
+	else:
+		# No attacker context — move toward nearest enemy (fallback)
+		var opp_id: int = 1 if champ.owner_id == 2 else 2
+		var enemies := state.get_living_champions(opp_id)
+		var nearest_dist: int = 999
+		for tile: Vector2i in reachable:
+			for enemy: ChampionState in enemies:
+				var dist: int = absi(tile.x - enemy.position.x) + absi(tile.y - enemy.position.y)
+				if dist < nearest_dist:
+					nearest_dist = dist
+					best_pos = tile
+
+	if best_pos != champ.position:
+		var old_pos: Vector2i = champ.position
+		champ.position = best_pos
+		champ.has_moved = true
+		print("AI immediate move: %s moved from %s to %s (away from attacker)" % [champ.champion_name, old_pos, best_pos])
+
+		var active_board = get_active_board()
+		if active_board:
+			active_board.animate_move(champion_id, [best_pos] as Array[Vector2i])
+			active_board.update_champion_positions()
+	else:
+		print("AI immediate move: %s stayed at %s" % [champ.champion_name, champ.position])
 
 
 # === Mind Control Handling (Betrayal) ===

@@ -950,6 +950,10 @@ func _on_immediate_movement_required(champion_ids: Array, _movement_bonus: int) 
 	if state == null:
 		return
 
+	# Check if there's a pending attack — if so, move away from attacker (dodge)
+	var attacker_id: String = game_controller._pending_action.get("attacker_id", "")
+	var attacker: ChampionState = state.get_champion(attacker_id) if not attacker_id.is_empty() else null
+
 	for champ_id in champion_ids:
 		var champ := state.get_champion(str(champ_id))
 		if champ == null or not champ.is_alive():
@@ -968,19 +972,27 @@ func _on_immediate_movement_required(champion_ids: Array, _movement_bonus: int) 
 			_debug("    [MOVE] %s has no reachable tiles" % champ.champion_name)
 			continue
 
-		# Simple AI: move toward nearest enemy
-		var opp_id: int = 1 if champ.owner_id == 2 else 2
-		var enemies := state.get_living_champions(opp_id)
-
 		var best_pos: Vector2i = champ.position
-		var best_dist: int = 999
 
-		for tile: Vector2i in reachable:
-			for enemy: ChampionState in enemies:
-				var dist: int = absi(tile.x - enemy.position.x) + absi(tile.y - enemy.position.y)
-				if dist < best_dist:
+		if attacker:
+			# Dodge: move to tile furthest from attacker
+			var best_dist: int = 0
+			for tile: Vector2i in reachable:
+				var dist: int = absi(tile.x - attacker.position.x) + absi(tile.y - attacker.position.y)
+				if dist > best_dist:
 					best_dist = dist
 					best_pos = tile
+		else:
+			# No attacker context — move toward nearest enemy
+			var opp_id: int = 1 if champ.owner_id == 2 else 2
+			var enemies := state.get_living_champions(opp_id)
+			var best_dist: int = 999
+			for tile: Vector2i in reachable:
+				for enemy: ChampionState in enemies:
+					var dist: int = absi(tile.x - enemy.position.x) + absi(tile.y - enemy.position.y)
+					if dist < best_dist:
+						best_dist = dist
+						best_pos = tile
 
 		# Execute the move
 		if best_pos != champ.position:
@@ -992,6 +1004,10 @@ func _on_immediate_movement_required(champion_ids: Array, _movement_bonus: int) 
 			# Emit movement signal for effect tracking
 			if game_controller.effect_processor != null:
 				game_controller.effect_processor.champion_moved.emit(champ.unique_id, old_pos, best_pos)
+
+	# Resolve the pending attack/cast after all movements complete
+	# Use call_deferred to avoid resolving during the trigger call stack
+	game_controller.call_deferred("resolve_immediate_movement")
 
 
 func _on_discard_selection_required(player_id: int, _caster_id: String, _damage_per_card: int) -> void:
