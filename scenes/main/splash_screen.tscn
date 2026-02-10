@@ -75,7 +75,7 @@ anchor_top = 1.0
 anchor_right = 0.5
 anchor_bottom = 1.0
 offset_left = -140.0
-offset_top = -220.0
+offset_top = -350.0
 offset_right = 140.0
 offset_bottom = -60.0
 grow_horizontal = 2
@@ -99,10 +99,20 @@ custom_minimum_size = Vector2(280, 50)
 layout_mode = 2
 text = "3D Battle Chess (WIP)"
 
+[node name="ButtonMP" type="Button" parent="ButtonContainer"]
+custom_minimum_size = Vector2(280, 50)
+layout_mode = 2
+text = "Multiplayer"
+
 [node name="ButtonDev" type="Button" parent="ButtonContainer"]
 custom_minimum_size = Vector2(280, 50)
 layout_mode = 2
 text = "Developer Mode"
+
+[node name="ButtonHost" type="Button" parent="ButtonContainer"]
+custom_minimum_size = Vector2(280, 50)
+layout_mode = 2
+text = "Host for Friends"
 
 [node name="VersionLabel" type="Label" parent="."]
 layout_mode = 1

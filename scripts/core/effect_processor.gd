@@ -18,12 +18,16 @@ signal position_selection_required(player_id: int, valid_positions: Array, conte
 signal immediate_control_required(champion_id: String, controller_player_id: int)
 signal intel_choice_required(caster_owner_id: int, own_top_card: String, opp_top_card: String)
 signal discard_choice_required(player_id: int, count: int)
+signal placement_selection_required(player_id: int, champion_id: String, valid_positions: Array)
 
 var game_state: GameState
 
 # Pending discard selection context
 var _pending_discard_caster: String = ""
 var _pending_discard_damage: int = 0
+
+# Pending placement selection context (Heave "anyEmpty")
+var _pending_placement_champion_id: String = ""
 
 # Pending discard choice context (Introspection-style: player chooses which cards to discard)
 var _pending_discard_choice_player: int = -1
@@ -238,6 +242,45 @@ func has_pending_position_selection() -> bool:
 	return not _pending_position_context.is_empty()
 
 
+# --- Placement Selection System (Heave "anyEmpty") ---
+
+func resolve_placement(destination: Vector2i) -> Dictionary:
+	"""Resolve pending placement by moving the champion to the destination."""
+	if _pending_placement_champion_id.is_empty():
+		return {"success": false, "error": "No pending placement"}
+
+	var champion := game_state.get_champion(_pending_placement_champion_id)
+	if champion == null or not champion.is_alive():
+		_pending_placement_champion_id = ""
+		return {"success": false, "error": "Champion not found or dead"}
+
+	if not game_state.is_walkable(destination):
+		return {"success": false, "error": "Destination not walkable"}
+
+	var old_pos: Vector2i = champion.position
+	champion.position = destination
+	champion_moved.emit(champion.unique_id, old_pos, destination)
+	_pending_placement_champion_id = ""
+
+	return {"success": true, "champion_id": champion.unique_id, "from": old_pos, "to": destination}
+
+
+func has_pending_placement() -> bool:
+	"""Check if waiting for placement input."""
+	return not _pending_placement_champion_id.is_empty()
+
+
+func _get_all_empty_positions() -> Array[Vector2i]:
+	"""Get all walkable, unoccupied positions on the board."""
+	var positions: Array[Vector2i] = []
+	for y in range(GameState.BOARD_SIZE):
+		for x in range(GameState.BOARD_SIZE):
+			var pos := Vector2i(x, y)
+			if game_state.is_walkable(pos):
+				positions.append(pos)
+	return positions
+
+
 func _init(state: GameState) -> void:
 	game_state = state
 
@@ -437,7 +480,7 @@ func _process_single_effect(effect: Dictionary, caster: ChampionState, targets: 
 		"move":
 			result = _process_move(effect, caster, effective_targets, card_data)
 		"draw":
-			result = _process_draw(effect, caster, effective_targets)
+			result = _process_draw(effect, caster, effective_targets, str(card_data.get("name", "")))
 		"discard":
 			result = _process_discard(effect, caster, effective_targets)
 		"custom":
@@ -1312,6 +1355,25 @@ func _process_move(effect: Dictionary, caster: ChampionState, targets: Array, ca
 			"movement_bonus": movement_bonus
 		}
 
+	# "anyEmpty" - requires player/AI to pick destination tile (Heave)
+	if move_type == "anyEmpty":
+		if actual_targets.is_empty():
+			return {"type": "move", "success": false, "reason": "no_targets"}
+		var target: ChampionState = actual_targets[0]
+		var valid_positions: Array[Vector2i] = _get_all_empty_positions()
+		if valid_positions.is_empty():
+			return {"type": "move", "success": false, "reason": "no_empty_positions"}
+		_pending_placement_champion_id = target.unique_id
+		placement_selection_required.emit(caster.owner_id, target.unique_id, valid_positions)
+		return {
+			"type": "move",
+			"success": true,
+			"move_type": move_type,
+			"pending_placement": true,
+			"champion_id": target.unique_id,
+			"valid_positions": valid_positions
+		}
+
 	# Auto-calculated move types
 	for target: ChampionState in actual_targets:
 		var new_pos: Vector2i = _calculate_move_destination(move_type, caster, target)
@@ -1745,7 +1807,7 @@ func _find_safest_tile(target: ChampionState) -> Vector2i:
 
 # --- Draw Processing ---
 
-func _process_draw(effect: Dictionary, caster: ChampionState, _targets: Array) -> Dictionary:
+func _process_draw(effect: Dictionary, caster: ChampionState, _targets: Array, source_card_name: String = "") -> Dictionary:
 	# cards.json uses "value" for draw count
 	var draw_value = effect.get("value", effect.get("draw", 1))
 	var draw_count: int = 0
@@ -1779,7 +1841,7 @@ func _process_draw(effect: Dictionary, caster: ChampionState, _targets: Array) -
 			"deck":
 				drawn = game_state.draw_card(caster.owner_id)
 			"discard":
-				drawn = _draw_from_discard(caster.owner_id, filter, max_cost)
+				drawn = _draw_from_discard(caster.owner_id, filter, max_cost, source_card_name)
 			"oppDiscard":
 				var opp_id := 2 if caster.owner_id == 1 else 1
 				drawn = _draw_from_discard(opp_id, filter, max_cost)
@@ -1805,7 +1867,7 @@ func _process_draw(effect: Dictionary, caster: ChampionState, _targets: Array) -
 	}
 
 
-func _draw_from_discard(player_id: int, filter: String, max_cost: int = -1) -> String:
+func _draw_from_discard(player_id: int, filter: String, max_cost: int = -1, exclude_card: String = "") -> String:
 	"""Draw a card from discard pile, optionally filtered by champion and cost."""
 	var discard := game_state.get_discard(player_id)
 	var hand := game_state.get_hand(player_id)
@@ -1813,10 +1875,16 @@ func _draw_from_discard(player_id: int, filter: String, max_cost: int = -1) -> S
 	if discard.is_empty():
 		return ""
 
+	var excluded_one := false  # Track if we already excluded one copy
 	var valid_cards: Array[String] = []
 	for card_name: String in discard:
 		var card_data := CardDatabase.get_card(card_name)
 		if card_data.is_empty():
+			continue
+
+		# A card cannot retrieve itself from discard (e.g. Refocus)
+		if not exclude_card.is_empty() and card_name == exclude_card and not excluded_one:
+			excluded_one = true
 			continue
 
 		# Check filter (champion name)

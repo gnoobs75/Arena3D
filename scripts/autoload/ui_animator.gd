@@ -220,6 +220,33 @@ func screen_shake(intensity: float = 4.0, duration: float = 0.2) -> void:
 				_screen_shake_tween.tween_property(scene, "position", original_pos, step_dur)
 
 
+# === SCREEN FLASH ===
+
+var _flash_overlay: ColorRect = null
+var _flash_tween: Tween
+
+func screen_flash(color: Color = Color(1, 1, 1, 0.25), duration: float = 0.3) -> void:
+	"""Flash the screen a color (for card plays, big hits, etc.)."""
+	if _flash_overlay == null:
+		_flash_overlay = ColorRect.new()
+		_flash_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+		_flash_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_flash_overlay.modulate.a = 0.0
+		_flash_overlay.z_index = 90
+		var canvas := CanvasLayer.new()
+		canvas.layer = 90
+		canvas.add_child(_flash_overlay)
+		add_child(canvas)
+
+	if _flash_tween and _flash_tween.is_valid():
+		_flash_tween.kill()
+
+	_flash_overlay.color = Color(color.r, color.g, color.b)
+	_flash_overlay.modulate.a = color.a
+	_flash_tween = create_tween()
+	_flash_tween.tween_property(_flash_overlay, "modulate:a", 0.0, duration).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_CUBIC)
+
+
 # === SCREEN TRANSITION ===
 
 var _transition_overlay: ColorRect = null

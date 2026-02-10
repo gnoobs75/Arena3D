@@ -1,7 +1,8 @@
 extends Control
 class_name CharacterSelect
 ## CharacterSelect - Fighting game style character selection with snake draft
-## Flow: P1 picks -> AI picks -> P1 picks -> AI picks -> FIGHT!
+## Flow: P1 picks -> P2 picks -> P2 picks -> P1 picks -> FIGHT!
+## Supports both local (AI opponent) and networked (remote opponent) draft
 
 signal selection_complete(p1_champions: Array, p2_champions: Array, use_3d: bool)
 
@@ -19,11 +20,12 @@ const HOVER_SCALE := 1.08
 const HOVER_DURATION := 0.15
 
 # === DRAFT STATE ===
-enum DraftPhase { P1_PICK1, AI_PICK1, P1_PICK2, AI_PICK2, COMPLETE }
+enum DraftPhase { P1_PICK1, P2_PICK1, P2_PICK2, P1_PICK2, COMPLETE }
 var draft_phase: DraftPhase = DraftPhase.P1_PICK1
 var p1_selections: Array[String] = []
 var p2_selections: Array[String] = []
 var use_3d_mode: bool = false
+var is_network_draft: bool = false  # true when drafting over network
 var _taken_champions: Dictionary = {}  # champion_name -> player_id
 
 # === NODE REFERENCES ===
@@ -40,6 +42,9 @@ func _ready() -> void:
 	_build_ui()
 	_update_phase_display()
 	_play_entrance_animations()
+	if is_network_draft:
+		NetworkManager.draft_pick_received.connect(_on_network_draft_pick)
+		NetworkManager.draft_complete.connect(_on_network_draft_complete)
 
 
 func _build_ui() -> void:
@@ -327,8 +332,17 @@ func _build_selection_panel() -> Control:
 	panel.alignment = BoxContainer.ALIGNMENT_CENTER
 	panel.add_theme_constant_override("separation", 50)
 
-	# Player 1 side
-	var p1_panel := _build_player_panel(1, "PLAYER")
+	# Player 1 side - label depends on whether local player is P1 or P2
+	var p1_label := "PLAYER"
+	var p2_label := "CPU"
+	if is_network_draft:
+		if NetworkManager.local_player_id == 1:
+			p1_label = "YOU"
+			p2_label = "OPPONENT"
+		else:
+			p1_label = "OPPONENT"
+			p2_label = "YOU"
+	var p1_panel := _build_player_panel(1, p1_label)
 	panel.add_child(p1_panel)
 
 	# VS label
@@ -345,8 +359,8 @@ func _build_selection_panel() -> Control:
 	vs_container.add_child(vs_label)
 	panel.add_child(vs_container)
 
-	# Player 2 / CPU side
-	var p2_panel := _build_player_panel(2, "CPU")
+	# Player 2 / CPU or Opponent side
+	var p2_panel := _build_player_panel(2, p2_label)
 	panel.add_child(p2_panel)
 
 	return panel
@@ -512,6 +526,19 @@ func _on_card_gui_input(event: InputEvent, champion_name: String) -> void:
 		_select_champion(champion_name)
 
 
+func _is_local_turn() -> bool:
+	"""Check if it's the local player's turn to pick."""
+	if not is_network_draft:
+		# In local mode, P1 phases are local, P2 phases are AI
+		return draft_phase == DraftPhase.P1_PICK1 or draft_phase == DraftPhase.P1_PICK2
+	# In network mode, check if current phase matches local player
+	var local_id := NetworkManager.local_player_id
+	if local_id == 1:
+		return draft_phase == DraftPhase.P1_PICK1 or draft_phase == DraftPhase.P1_PICK2
+	else:
+		return draft_phase == DraftPhase.P2_PICK1 or draft_phase == DraftPhase.P2_PICK2
+
+
 func _select_champion(champion_name: String) -> void:
 	"""Handle champion selection during draft."""
 	if _is_champion_taken(champion_name):
@@ -520,27 +547,51 @@ func _select_champion(champion_name: String) -> void:
 	if draft_phase == DraftPhase.COMPLETE:
 		return
 
-	# Only allow selection during player phases
-	if draft_phase == DraftPhase.P1_PICK1 or draft_phase == DraftPhase.P1_PICK2:
+	# Only allow selection during local player's turn
+	if not _is_local_turn():
+		return
+
+	# Determine which player is picking based on current phase
+	var picking_player := 1 if (draft_phase == DraftPhase.P1_PICK1 or draft_phase == DraftPhase.P1_PICK2) else 2
+
+	if picking_player == 1:
 		p1_selections.append(champion_name)
-		_mark_champion_taken(champion_name, 1)
-		_update_pick_slot(1, p1_selections.size() - 1, champion_name)
+	else:
+		p2_selections.append(champion_name)
+	_mark_champion_taken(champion_name, picking_player)
+	var slot_idx := (p1_selections.size() - 1) if picking_player == 1 else (p2_selections.size() - 1)
+	_update_pick_slot(picking_player, slot_idx, champion_name)
 
-		# Advance to AI pick
-		if draft_phase == DraftPhase.P1_PICK1:
-			draft_phase = DraftPhase.AI_PICK1
-		else:
-			draft_phase = DraftPhase.AI_PICK2
+	# Send pick over network if in network mode
+	if is_network_draft:
+		NetworkManager.send_draft_pick(champion_name)
 
-		_update_phase_display()
+	# Advance phase
+	_advance_phase()
+
+
+func _advance_phase() -> void:
+	"""Advance to the next draft phase after a pick."""
+	match draft_phase:
+		DraftPhase.P1_PICK1:
+			draft_phase = DraftPhase.P2_PICK1
+		DraftPhase.P2_PICK1:
+			draft_phase = DraftPhase.P2_PICK2
+		DraftPhase.P2_PICK2:
+			draft_phase = DraftPhase.P1_PICK2
+		DraftPhase.P1_PICK2:
+			draft_phase = DraftPhase.COMPLETE
+			_on_draft_complete()
+
+	_update_phase_display()
+
+	# In local mode, do AI pick if it's now P2's turn
+	if not is_network_draft and (draft_phase == DraftPhase.P2_PICK1 or draft_phase == DraftPhase.P2_PICK2):
 		_do_ai_pick()
 
 
 func _do_ai_pick() -> void:
-	"""AI makes a pick after a delay."""
-	if draft_phase != DraftPhase.AI_PICK1 and draft_phase != DraftPhase.AI_PICK2:
-		return
-
+	"""AI makes a pick after a delay (local mode only)."""
 	# Disable input during AI pick
 	set_process_input(false)
 
@@ -561,16 +612,46 @@ func _do_ai_pick() -> void:
 	_update_pick_slot(2, p2_selections.size() - 1, pick)
 
 	# Advance phase
-	if draft_phase == DraftPhase.AI_PICK1:
-		draft_phase = DraftPhase.P1_PICK2
-	else:
-		draft_phase = DraftPhase.COMPLETE
-		_show_fight_button()
-
-	_update_phase_display()
+	_advance_phase()
 
 	# Re-enable input
 	set_process_input(true)
+
+
+func _on_draft_complete() -> void:
+	"""Called when all picks are done."""
+	if is_network_draft and NetworkManager.is_host():
+		# Host sends the finalized draft to guest
+		NetworkManager.send_draft_complete(p1_selections, p2_selections)
+	_show_fight_button()
+
+
+# === NETWORK HANDLERS ===
+
+func _on_network_draft_pick(_player_id: int, champion_name: String) -> void:
+	"""Handle opponent's draft pick received over network."""
+	if champion_name.is_empty() or _is_champion_taken(champion_name):
+		return
+
+	# Determine which player is picking based on current phase
+	var picking_player := 1 if (draft_phase == DraftPhase.P1_PICK1 or draft_phase == DraftPhase.P1_PICK2) else 2
+
+	if picking_player == 1:
+		p1_selections.append(champion_name)
+	else:
+		p2_selections.append(champion_name)
+	_mark_champion_taken(champion_name, picking_player)
+	var slot_idx := (p1_selections.size() - 1) if picking_player == 1 else (p2_selections.size() - 1)
+	_update_pick_slot(picking_player, slot_idx, champion_name)
+
+	# Advance phase
+	_advance_phase()
+
+
+func _on_network_draft_complete(_p1_champions: Array, _p2_champions: Array) -> void:
+	"""Handle draft complete confirmation from host (guest-side)."""
+	# Guest can verify the picks match if needed
+	pass
 
 
 func _show_fight_button() -> void:
@@ -604,6 +685,12 @@ func _start_fight_pulse() -> void:
 
 func _on_fight_pressed() -> void:
 	"""Handle FIGHT button press with transition."""
+	if is_network_draft:
+		# Disconnect network signals to avoid double processing
+		if NetworkManager.draft_pick_received.is_connected(_on_network_draft_pick):
+			NetworkManager.draft_pick_received.disconnect(_on_network_draft_pick)
+		if NetworkManager.draft_complete.is_connected(_on_network_draft_complete):
+			NetworkManager.draft_complete.disconnect(_on_network_draft_complete)
 	if UIAnimator:
 		await UIAnimator.transition_fade_out(0.3)
 	selection_complete.emit(p1_selections, p2_selections, use_3d_mode)
@@ -715,19 +802,44 @@ func _update_pick_slot(player_id: int, slot_index: int, champion_name: String) -
 
 func _update_phase_display() -> void:
 	"""Update the phase instruction label."""
+	if is_network_draft:
+		_update_phase_display_network()
+	else:
+		_update_phase_display_local()
+
+
+func _update_phase_display_local() -> void:
+	"""Phase display for local (vs AI) mode."""
 	match draft_phase:
 		DraftPhase.P1_PICK1:
 			phase_label.text = "Player 1: Choose your FIRST champion!"
 			phase_label.add_theme_color_override("font_color", VisualTheme.PLAYER1_COLOR)
-		DraftPhase.AI_PICK1:
+		DraftPhase.P2_PICK1:
+			phase_label.text = "CPU is choosing..."
+			phase_label.add_theme_color_override("font_color", VisualTheme.PLAYER2_COLOR)
+		DraftPhase.P2_PICK2:
 			phase_label.text = "CPU is choosing..."
 			phase_label.add_theme_color_override("font_color", VisualTheme.PLAYER2_COLOR)
 		DraftPhase.P1_PICK2:
 			phase_label.text = "Player 1: Choose your SECOND champion!"
 			phase_label.add_theme_color_override("font_color", VisualTheme.PLAYER1_COLOR)
-		DraftPhase.AI_PICK2:
-			phase_label.text = "CPU is choosing..."
-			phase_label.add_theme_color_override("font_color", VisualTheme.PLAYER2_COLOR)
+		DraftPhase.COMPLETE:
+			phase_label.text = "All champions selected! Ready to battle!"
+			phase_label.add_theme_color_override("font_color", VisualTheme.UI_ACCENT)
+
+
+func _update_phase_display_network() -> void:
+	"""Phase display for network (vs opponent) mode."""
+	var is_my_turn := _is_local_turn()
+	var pick_num := "FIRST" if (draft_phase == DraftPhase.P1_PICK1 or draft_phase == DraftPhase.P2_PICK1) else "SECOND"
+	match draft_phase:
+		DraftPhase.P1_PICK1, DraftPhase.P1_PICK2, DraftPhase.P2_PICK1, DraftPhase.P2_PICK2:
+			if is_my_turn:
+				phase_label.text = "Your turn: Choose your %s champion!" % pick_num
+				phase_label.add_theme_color_override("font_color", VisualTheme.PLAYER1_COLOR)
+			else:
+				phase_label.text = "Opponent is choosing..."
+				phase_label.add_theme_color_override("font_color", VisualTheme.PLAYER2_COLOR)
 		DraftPhase.COMPLETE:
 			phase_label.text = "All champions selected! Ready to battle!"
 			phase_label.add_theme_color_override("font_color", VisualTheme.UI_ACCENT)

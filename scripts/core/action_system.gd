@@ -135,6 +135,10 @@ class AttackAction extends Action:
 		if not target.is_alive():
 			return false
 
+		# Stealthed champions cannot be targeted by attacks
+		if target.has_buff("stealth"):
+			return false
+
 		# Check range
 		var range_calc := RangeCalculator.new()
 		return range_calc.can_attack(attacker, target, state)
@@ -284,7 +288,7 @@ class CastCardAction extends Action:
 
 		# Check mana
 		var card_data := CardDatabase.get_card(card_name)
-		var cost: int = card_data.get("cost", 0)
+		var cost: int = state.get_effective_cost(card_name)
 
 		# CRITICAL: Champions can only cast their own cards
 		var card_character: String = card_data.get("character", "")
@@ -354,6 +358,9 @@ class CastCardAction extends Action:
 		if caster == null:
 			return false
 
+		# Cards with "range": "global" bypass all range checks
+		var is_global: bool = str(card_data.get("range", "")).to_lower() == "global"
+
 		match target_type.to_lower():
 			"none":
 				return true  # No target needed
@@ -366,7 +373,10 @@ class CastCardAction extends Action:
 				var target := state.get_champion(str(targets[0]))
 				if target == null or target.owner_id == state.active_player:
 					return false
-				return _is_in_range(caster, target)
+				# Stealthed enemies cannot be targeted by single-target spells
+				if target.has_buff("stealth"):
+					return false
+				return is_global or _is_in_range(caster, target)
 			"ally", "friendly":
 				# Friendly targets an ally (can include self for some cards)
 				if targets.is_empty():
@@ -374,21 +384,24 @@ class CastCardAction extends Action:
 				var target := state.get_champion(str(targets[0]))
 				if target == null or target.owner_id != state.active_player:
 					return false
-				return _is_in_range(caster, target)
+				return is_global or _is_in_range(caster, target)
 			"champion", "any":
 				if targets.is_empty():
 					return false
 				var target := state.get_champion(str(targets[0]))
 				if target == null:
 					return false
-				return _is_in_range(caster, target)
+				# Stealthed enemies cannot be targeted by single-target spells
+				if target.has_buff("stealth") and target.owner_id != state.active_player:
+					return false
+				return is_global or _is_in_range(caster, target)
 			"allyorself":
 				if targets.is_empty():
 					return false
 				var target := state.get_champion(str(targets[0]))
 				if target == null or target.owner_id != state.active_player:
 					return false
-				return _is_in_range(caster, target)
+				return is_global or _is_in_range(caster, target)
 			"direction":
 				# Direction targeting - targets should contain direction string
 				if targets.is_empty():
@@ -463,7 +476,7 @@ class CastCardAction extends Action:
 			return false
 
 		var card_data := CardDatabase.get_card(card_name)
-		var cost: int = card_data.get("cost", 0)
+		var cost: int = state.get_effective_cost(card_name)
 
 		# Check for freeRangerCard buff
 		var card_character: String = card_data.get("character", "")
@@ -622,7 +635,7 @@ func get_valid_actions(state: GameState, player_id: int) -> Array:
 		if champion.can_attack():
 			var range_calc := RangeCalculator.new()
 			for enemy: ChampionState in state.get_champions(3 - player_id):
-				if enemy.is_alive() and range_calc.can_attack(champion, enemy, state):
+				if enemy.is_alive() and not enemy.has_buff("stealth") and range_calc.can_attack(champion, enemy, state):
 					var attack := AttackAction.new(champion.unique_id, enemy.unique_id)
 					if attack.is_valid(state):
 						actions.append(attack)
@@ -633,7 +646,7 @@ func get_valid_actions(state: GameState, player_id: int) -> Array:
 			for card_name: String in hand:
 				var card_data := CardDatabase.get_card(card_name)
 				if card_data.get("type") == "Action":
-					var cost: int = card_data.get("cost", 0)
+					var cost: int = state.get_effective_cost(card_name)
 					if state.get_mana(player_id) >= cost:
 						# Generate for each valid target
 						var target_actions := _generate_cast_targets(state, champion, card_data, card_name)

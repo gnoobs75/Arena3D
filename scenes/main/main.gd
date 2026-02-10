@@ -6,6 +6,7 @@ var status_label: Label = null
 var ai_test_running: bool = false
 var splash_screen: SplashScreen = null
 var character_select: CharacterSelect = null
+var lobby: Control = null
 var database_ready: bool = false
 
 
@@ -115,6 +116,7 @@ func _show_splash_screen() -> void:
 	splash_screen = splash_scene.instantiate()
 	splash_screen.mode_selected.connect(_on_mode_selected)
 	splash_screen.developer_mode_selected.connect(_on_developer_mode_selected)
+	splash_screen.multiplayer_selected.connect(_on_multiplayer_selected)
 	add_child(splash_screen)
 	print("Main: Splash screen displayed")
 
@@ -173,12 +175,78 @@ func _start_developer_mode_game(p1_champions: Array, p2_champions: Array) -> voi
 	print("Main: Developer Mode game started with teams P1:%s P2:%s" % [p1_champions, p2_champions])
 
 
-func _show_character_select(use_3d: bool) -> void:
+func _on_multiplayer_selected() -> void:
+	"""Handle multiplayer mode selection from splash screen."""
+	print("Main: Multiplayer selected")
+
+	# Remove splash screen
+	if splash_screen and is_instance_valid(splash_screen):
+		splash_screen.queue_free()
+		splash_screen = null
+
+	_show_lobby()
+
+
+func _show_lobby() -> void:
+	"""Show the multiplayer lobby."""
+	print("Main: Showing lobby...")
+
+	# Hide the loading UI
+	var ui: Node = get_node_or_null("UI")
+	if ui:
+		ui.visible = false
+
+	# Load lobby scene script and create it
+	var lobby_script: GDScript = preload("res://scenes/main/lobby.gd")
+	lobby = Control.new()
+	lobby.set_anchors_preset(Control.PRESET_FULL_RECT)
+	lobby.set_script(lobby_script)
+	# Connect signals before add_child so we don't miss any emitted during _ready
+	lobby.game_starting.connect(_on_lobby_game_starting)
+	lobby.back_to_menu.connect(_on_lobby_back_to_menu)
+	add_child(lobby)
+	print("Main: Lobby displayed")
+
+
+func _on_lobby_game_starting(room_code: String, _use_3d: bool) -> void:
+	"""Handle game starting from lobby - transition to character select."""
+	print("Main: Game starting from lobby, room: %s" % room_code)
+
+	# Remove lobby
+	if lobby and is_instance_valid(lobby):
+		lobby.queue_free()
+		lobby = null
+
+	# Set network game flag
+	GameManager.is_network_game = true
+
+	# Show character select for networked draft
+	_show_character_select(false, true)  # Use 2D for multiplayer, network draft
+
+
+func _on_lobby_back_to_menu() -> void:
+	"""Handle back to menu from lobby."""
+	print("Main: Returning to splash screen from lobby")
+
+	# Remove lobby
+	if lobby and is_instance_valid(lobby):
+		lobby.queue_free()
+		lobby = null
+
+	# Disconnect from server
+	NetworkManager.disconnect_from_server()
+
+	# Show splash screen again
+	_show_splash_screen()
+
+
+func _show_character_select(use_3d: bool, network_draft: bool = false) -> void:
 	"""Show the character selection screen."""
-	print("Main: Showing character select screen...")
+	print("Main: Showing character select screen... (network=%s)" % network_draft)
 	var char_select_scene: PackedScene = preload("res://scenes/main/character_select.tscn")
 	character_select = char_select_scene.instantiate()
 	character_select.use_3d_mode = use_3d
+	character_select.is_network_draft = network_draft
 	character_select.selection_complete.connect(_on_selection_complete)
 	add_child(character_select)
 	print("Main: Character select displayed")

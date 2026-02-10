@@ -23,7 +23,7 @@ signal champion_debuff_removed(champion_id: String, debuff_name: String)
 
 # Card Signals
 signal card_drawn(player_id: int, card_id: String)
-signal card_played(player_id: int, card_id: String, targets: Array)
+signal card_played(player_id: int, card_id: String, targets: Array, caster_id: String)
 signal card_discarded(player_id: int, card_id: String)
 signal card_hovered(card_id: String)
 signal card_unhovered(card_id: String)
@@ -61,6 +61,20 @@ signal player_connected(player_id: int)
 signal player_disconnected(player_id: int)
 signal sync_received(state: Dictionary)
 signal network_error(message: String)
+
+# Multiplayer Signals
+signal multiplayer_room_created(room_code: String)
+signal multiplayer_room_joined(room_code: String)
+signal multiplayer_opponent_joined(opponent_name: String)
+signal multiplayer_opponent_left(reason: String)
+signal multiplayer_draft_pick(player_id: int, champion_name: String)
+signal multiplayer_draft_complete(p1_champions: Array, p2_champions: Array)
+signal multiplayer_chat_received(sender: String, message: String, channel: String)
+signal multiplayer_emote_received(sender: String, emote_id: String)
+signal multiplayer_opponent_reconnecting()
+signal multiplayer_opponent_reconnected()
+signal multiplayer_ai_takeover(player_id: int)
+signal multiplayer_connection_state_changed(state: String)
 
 
 func _ready() -> void:

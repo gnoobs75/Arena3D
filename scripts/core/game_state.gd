@@ -46,6 +46,9 @@ var player2_discard: Array[String] = []
 var player1_response_slot: String = ""  # Card name or empty
 var player2_response_slot: String = ""
 
+# Cards drawn at start of turn (for "ifDrawnStart" cost reduction)
+var _cards_drawn_this_turn: Dictionary = {}  # card_name -> true
+
 # Board terrain (10x10)
 var board_terrain: Array = []  # 2D array of Terrain enum
 
@@ -205,9 +208,10 @@ func _draw_initial_hands() -> void:
 
 # --- Card Operations ---
 
-func draw_card(player_id: int) -> String:
+func draw_card(player_id: int, is_turn_start_draw: bool = false) -> String:
 	"""Draw a card for player. Returns card name or empty if deck empty.
-	Cards belonging to dead champions are automatically discarded."""
+	Cards belonging to dead champions are automatically discarded.
+	Set is_turn_start_draw=true for the draw at turn start (for ifDrawnStart cards)."""
 	var deck := get_deck(player_id)
 	var hand := get_hand(player_id)
 	var discard := get_discard(player_id)
@@ -225,9 +229,45 @@ func draw_card(player_id: int) -> String:
 
 		# Valid card - add to hand
 		hand.append(card_name)
+
+		# Track if drawn at turn start
+		if is_turn_start_draw:
+			_cards_drawn_this_turn[card_name] = true
+
 		return card_name
 
 	return ""
+
+
+func was_drawn_this_turn(card_name: String) -> bool:
+	"""Check if a card was drawn at start of the current turn."""
+	return _cards_drawn_this_turn.has(card_name)
+
+
+func clear_drawn_this_turn() -> void:
+	"""Clear the drawn-this-turn tracking (called at end of turn)."""
+	_cards_drawn_this_turn.clear()
+
+
+func get_effective_cost(card_name: String) -> int:
+	"""Get the effective cost of a card, accounting for conditional cost reductions."""
+	var card_data := CardDatabase.get_card(card_name)
+	var base_cost: int = card_data.get("cost", 0)
+
+	# Check for ifDrawnStart condition
+	var condition: Dictionary = card_data.get("condition", {})
+	if condition.has("ifDrawnStart") and was_drawn_this_turn(card_name):
+		var reduced_cost: int = condition["ifDrawnStart"].get("cost", base_cost)
+		return reduced_cost
+
+	# Check for freeRangerCard buff - any Ranger card is free
+	var card_character: String = card_data.get("character", "")
+	if card_character == "Ranger":
+		for champ: ChampionState in get_living_champions(active_player):
+			if champ.has_buff("freeRangerCard"):
+				return 0
+
+	return base_cost
 
 
 func _is_champion_dead_by_name(player_id: int, champion_name: String) -> bool:

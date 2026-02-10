@@ -13,6 +13,8 @@ var player_id: int = 1
 var slotted_card: String = ""
 var card_visual: CardVisual = null
 var game_state: GameState = null
+var response_window_active: bool = false  # Pulsing glow when response window open
+var _pulse_time: float = 0.0
 
 # Visual settings
 const SLOT_WIDTH := 145
@@ -26,6 +28,19 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 
 	gui_input.connect(_on_gui_input)
+
+
+func _process(delta: float) -> void:
+	if response_window_active:
+		_pulse_time += delta * VisualTheme.RESPONSE_PULSE_SPEED
+		queue_redraw()
+
+
+func set_response_window_active(active: bool) -> void:
+	"""Set whether the response window is currently open."""
+	response_window_active = active
+	_pulse_time = 0.0
+	queue_redraw()
 
 
 func setup(pid: int, state: GameState) -> void:
@@ -98,13 +113,25 @@ func _draw() -> void:
 	var w := size.x
 	var h := size.y
 
+	# Pulsing glow when response window is active
+	if response_window_active:
+		var pulse := (sin(_pulse_time) + 1.0) * 0.5
+		var glow_col := VisualTheme.RESPONSE_PULSE_COLOR
+		for i in range(3, 0, -1):
+			var a := glow_col.a * pulse * (1.0 - float(i) / 3.0)
+			draw_rect(Rect2(-i * 2, -i * 2, w + i * 4, h + i * 4), Color(glow_col.r, glow_col.g, glow_col.b, a), false, 2.5)
+
 	# Background
 	var bg_color := Color(0.12, 0.12, 0.15, 0.9)
 	draw_rect(Rect2(0, 0, w, h), bg_color)
 
 	# Border color based on state
 	var border_color: Color
-	if slotted_card.is_empty():
+	if response_window_active:
+		var pulse := (sin(_pulse_time) + 1.0) * 0.5
+		border_color = VisualTheme.RESPONSE_PULSE_COLOR
+		border_color.a = 0.7 + pulse * 0.3
+	elif slotted_card.is_empty():
 		border_color = Color(0.4, 0.4, 0.5, 0.7)  # Dim when empty
 	else:
 		border_color = Color(0.9, 0.6, 0.2, 1.0)  # Orange when card slotted
@@ -117,7 +144,8 @@ func _draw() -> void:
 	var label_text := "RESPONSE"
 	var label_size := font.get_string_size(label_text, HORIZONTAL_ALIGNMENT_CENTER, -1, 10)
 	var label_pos := Vector2((w - label_size.x) / 2, h - 8)
-	draw_string(font, label_pos, label_text, HORIZONTAL_ALIGNMENT_CENTER, -1, 10, Color(0.6, 0.6, 0.7))
+	var label_col := VisualTheme.RESPONSE_PULSE_COLOR if response_window_active else Color(0.6, 0.6, 0.7)
+	draw_string(font, label_pos, label_text, HORIZONTAL_ALIGNMENT_CENTER, -1, 10, label_col)
 
 	# If empty, show hint
 	if slotted_card.is_empty():

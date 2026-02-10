@@ -18,6 +18,9 @@ var highlights_container: Node2D
 var champions_container: Node2D
 var coords_container: Node2D
 var board_frame: Control
+var vfx_below: BoardVFXLayer  # Particles rendered below champions
+var vfx_above: BoardVFXLayer  # Particles rendered above champions
+var crowd_layer: Node2D = null  # Arena crowd around the board
 var _is_ready: bool = false
 
 # State
@@ -53,10 +56,20 @@ func _ready() -> void:
 		highlights_container.name = "Highlights"
 		add_child(highlights_container)
 
+	# VFX below champions
+	vfx_below = BoardVFXLayer.new()
+	vfx_below.name = "VFXBelow"
+	add_child(vfx_below)
+
 	if champions_container == null:
 		champions_container = Node2D.new()
 		champions_container.name = "Champions"
 		add_child(champions_container)
+
+	# VFX above champions
+	vfx_above = BoardVFXLayer.new()
+	vfx_above.name = "VFXAbove"
+	add_child(vfx_above)
 
 	if coords_container == null:
 		coords_container = Node2D.new()
@@ -66,6 +79,8 @@ func _ready() -> void:
 	_is_ready = true
 	_create_board()
 	_create_coordinate_labels()
+	_create_board_frame()
+	_create_crowd_layer()
 
 
 func _create_board() -> void:
@@ -153,6 +168,29 @@ func _create_coordinate_labels() -> void:
 		coords_container.add_child(label)
 
 
+func _create_board_frame() -> void:
+	"""Create ornamental board frame using the COORD_MARGIN area."""
+	var frame := BoardFrameDrawer.new()
+	frame.board_size_px = BOARD_SIZE * TILE_SIZE
+	frame.margin = COORD_MARGIN
+	frame.size = Vector2(BOARD_SIZE * TILE_SIZE + COORD_MARGIN * 2, BOARD_SIZE * TILE_SIZE + COORD_MARGIN * 2)
+	# Insert behind tiles but ensure it renders
+	add_child(frame)
+	move_child(frame, 0)
+
+
+func _create_crowd_layer() -> void:
+	"""Create spectator crowd around the arena board."""
+	var crowd_script := load("res://scenes/game/board/arena_crowd_layer.gd")
+	if crowd_script:
+		crowd_layer = crowd_script.new()
+		crowd_layer.name = "ArenaCrowd"
+		crowd_layer.z_index = -1  # Behind everything
+		add_child(crowd_layer)
+		move_child(crowd_layer, 0)  # First child = drawn first
+		crowd_layer.setup(BOARD_SIZE * TILE_SIZE, COORD_MARGIN)
+
+
 func initialize(state: GameState) -> void:
 	"""Initialize board with game state."""
 	game_state = state
@@ -161,6 +199,7 @@ func initialize(state: GameState) -> void:
 		return
 	update_terrain()
 	_create_champions()
+	_setup_vfx_layers()
 
 
 func update_terrain() -> void:
@@ -173,6 +212,81 @@ func update_terrain() -> void:
 			if drawer:
 				drawer.terrain_type = terrain
 				drawer.queue_redraw()
+
+
+func _setup_vfx_layers() -> void:
+	"""Initialize VFX layers with pit tile positions."""
+	var pits: Array[Vector2i] = []
+	if game_state:
+		for y in range(BOARD_SIZE):
+			for x in range(BOARD_SIZE):
+				if game_state.get_terrain(Vector2i(x, y)) == 2:  # PIT
+					pits.append(Vector2i(x, y))
+	# Position VFX at same offset as tiles
+	vfx_below.position = Vector2(COORD_MARGIN, COORD_MARGIN)
+	vfx_above.position = Vector2(COORD_MARGIN, COORD_MARGIN)
+	vfx_below.setup(TILE_SIZE, pits)
+	vfx_above.setup(TILE_SIZE, pits)
+
+
+func trigger_dust(grid_pos: Vector2i) -> void:
+	"""Trigger dust VFX at a grid position (below champions)."""
+	vfx_below.spawn_dust_trail(_grid_to_world(grid_pos))
+
+
+func trigger_melee_impact(grid_pos: Vector2i) -> void:
+	"""Trigger melee impact sparks (above champions)."""
+	vfx_above.spawn_melee_impact(_grid_to_world(grid_pos))
+
+
+func trigger_ranged_trail(from_grid: Vector2i, to_grid: Vector2i) -> void:
+	"""Trigger ranged projectile trail (above champions)."""
+	vfx_above.spawn_ranged_trail(_grid_to_world(from_grid), _grid_to_world(to_grid))
+
+
+func trigger_magic_swirl(grid_pos: Vector2i, color: Color = VisualTheme.VFX_MAGIC) -> void:
+	"""Trigger magic swirl at target (above champions)."""
+	vfx_above.spawn_magic_swirl(_grid_to_world(grid_pos), color)
+
+
+func trigger_cast_shimmer(grid_pos: Vector2i) -> void:
+	"""Trigger cast sparkles rising from caster (above champions)."""
+	vfx_above.spawn_cast_shimmer(_grid_to_world(grid_pos))
+
+
+func trigger_death_vfx(grid_pos: Vector2i) -> void:
+	"""Trigger death effects (above champions)."""
+	vfx_above.spawn_death_vfx(_grid_to_world(grid_pos))
+
+
+func trigger_heal_sparkles(grid_pos: Vector2i) -> void:
+	"""Trigger heal sparkles (above champions)."""
+	vfx_above.spawn_heal_sparkles(_grid_to_world(grid_pos))
+
+
+func trigger_energy_beam(from_grid: Vector2i, to_grid: Vector2i, color: Color) -> void:
+	"""Trigger energy beam arc from caster to target (Action cards)."""
+	vfx_above.spawn_energy_beam(_grid_to_world(from_grid), _grid_to_world(to_grid), color)
+
+
+func trigger_cast_burst(grid_pos: Vector2i, color: Color) -> void:
+	"""Trigger radial particle burst (Action cards)."""
+	vfx_above.spawn_cast_burst(_grid_to_world(grid_pos), color)
+
+
+func trigger_shield_flash(grid_pos: Vector2i) -> void:
+	"""Trigger expanding shield ring (Response cards)."""
+	vfx_above.spawn_shield_flash(_grid_to_world(grid_pos))
+
+
+func trigger_equip_glow(grid_pos: Vector2i) -> void:
+	"""Trigger metallic sparkle attach (Equipment cards)."""
+	vfx_above.spawn_equip_glow(_grid_to_world(grid_pos))
+
+
+func trigger_smoke_poof(grid_pos: Vector2i) -> void:
+	"""Trigger smoke bomb cloud effect at champion position."""
+	vfx_above.spawn_smoke_poof(_grid_to_world(grid_pos))
 
 
 func _create_champions() -> void:
@@ -393,11 +507,12 @@ func update_champion_positions() -> void:
 
 
 func update_champion_hp() -> void:
-	"""Update HP displays for all champions."""
+	"""Update HP displays and status effects for all champions."""
 	for champ: ChampionState in game_state.get_all_champions():
 		if champion_nodes.has(champ.unique_id):
 			var visual: ChampionVisual = champion_nodes[champ.unique_id]
 			visual.update_hp(champ.current_hp, champ.max_hp)
+			visual.update_status_effects(champ)
 
 
 func animate_move(champion_id: String, path: Array[Vector2i], duration: float = 0.3) -> void:
@@ -473,7 +588,7 @@ func get_board_size_pixels() -> Vector2:
 # === Inner Classes ===
 
 class TileDrawer extends Control:
-	"""Custom drawing for a single tile with gradients and depth."""
+	"""Custom drawing for a single tile - raised stone slabs, wall blocks, pit voids."""
 	var tile_x: int = 0
 	var tile_y: int = 0
 	var terrain_type: int = 0  # GameState.Terrain enum value
@@ -481,66 +596,143 @@ class TileDrawer extends Control:
 	func _draw() -> void:
 		var w := size.x
 		var h := size.y
-
-		# Checkerboard pattern for empty tiles
 		var is_alt := (tile_x + tile_y) % 2 == 1
-
-		var border_color := VisualTheme.TILE_BORDER
+		var lighting := VisualTheme.get_tile_lighting(tile_x, tile_y)
 
 		match terrain_type:
-			1:  # WALL - raised appearance
-				var wall_top := VisualTheme.TILE_WALL.lerp(Color.WHITE, 0.1)
-				var wall_bottom := VisualTheme.TILE_WALL.lerp(Color.BLACK, 0.15)
-				VisualTheme.draw_vertical_gradient(self, Rect2(1, 1, w - 2, h - 2), wall_top, wall_bottom)
-				_draw_brick_pattern()
-				# Bevel for raised effect
-				VisualTheme.draw_bevel(self, Rect2(1, 1, w - 2, h - 2), 1.0, Color(1, 1, 1, 0.12), Color(0, 0, 0, 0.2))
-			2:  # PIT - sunken appearance
-				var pit_outer := VisualTheme.TILE_PIT
-				var pit_inner := VisualTheme.TILE_PIT.lerp(Color.BLACK, 0.3)
-				draw_rect(Rect2(1, 1, w - 2, h - 2), pit_outer)
-				# Radial-ish gradient (darker center)
-				draw_rect(Rect2(8, 8, w - 16, h - 16), pit_inner)
-				draw_rect(Rect2(14, 14, w - 28, h - 28), pit_inner.lerp(Color.BLACK, 0.3))
-				# Inset shadow for sunken effect
-				VisualTheme.draw_inset(self, Rect2(2, 2, w - 4, h - 4))
-				# Glowing edge
-				for i in range(3, 0, -1):
-					var glow_alpha := 0.25 * (1.0 - float(i) / 3.0)
-					draw_rect(Rect2(4 + i, 4 + i, w - 8 - i * 2, h - 8 - i * 2), Color(0.4, 0.2, 0.5, glow_alpha), false, 1.5)
-			_:  # EMPTY - subtle gradient
-				var base_color := VisualTheme.TILE_EMPTY_ALT if is_alt else VisualTheme.TILE_EMPTY
-				var top_color := base_color.lerp(Color.WHITE, 0.04)
-				var bottom_color := base_color.lerp(Color.BLACK, 0.04)
-				VisualTheme.draw_vertical_gradient(self, Rect2(1, 1, w - 2, h - 2), top_color, bottom_color)
-				# Very subtle inner shadow
-				draw_line(Vector2(2, 2), Vector2(w - 2, 2), Color(0, 0, 0, 0.1), 1.0)
-				draw_line(Vector2(2, 2), Vector2(2, h - 2), Color(0, 0, 0, 0.1), 1.0)
+			1:  # WALL - tall stone blocks with mortar
+				_draw_wall_tile(w, h, lighting)
+			2:  # PIT - gaping void with crumbling rim and purple glow
+				_draw_pit_tile(w, h, lighting)
+			_:  # EMPTY - raised stone slab with depth
+				_draw_empty_tile(w, h, is_alt, lighting)
 
-		# Grid border
-		draw_rect(Rect2(0, 0, w, h), border_color, false, 1.0)
+	func _draw_empty_tile(w: float, h: float, is_alt: bool, lighting: float) -> void:
+		var depth := float(VisualTheme.TILE_DEPTH_EMPTY)
+		var base := VisualTheme.TILE_STONE_DARK if is_alt else VisualTheme.TILE_STONE_LIGHT
+		base = VisualTheme.apply_lighting(base, lighting)
 
-	func _draw_brick_pattern() -> void:
-		"""Draw a subtle brick pattern with depth on wall tiles."""
-		var brick_color := VisualTheme.TILE_WALL_ACCENT
-		var brick_shadow := VisualTheme.TILE_WALL_ACCENT.lerp(Color.BLACK, 0.4)
-		var w := size.x
-		var h := size.y
+		# Ambient occlusion gap (dark border around slab)
+		draw_rect(Rect2(0, 0, w, h), VisualTheme.TILE_AO_GAP)
 
-		# Horizontal lines with shadow
-		for y_off in [16, 32, 48]:
-			draw_line(Vector2(2, y_off + 1), Vector2(w - 2, y_off + 1), brick_shadow, 1.0)  # Shadow
-			draw_line(Vector2(2, y_off), Vector2(w - 2, y_off), brick_color, 1.0)
+		# Side faces (depth) - right side and bottom side
+		var side_color := base.lerp(Color.BLACK, 0.35)
+		# Bottom depth face
+		var bottom_pts := PackedVector2Array([
+			Vector2(2, h - depth), Vector2(w - 2, h - depth),
+			Vector2(w - 2, h - 2), Vector2(2, h - 2)
+		])
+		draw_colored_polygon(bottom_pts, side_color)
+		# Right depth face
+		var right_pts := PackedVector2Array([
+			Vector2(w - depth, 2), Vector2(w - 2, 2),
+			Vector2(w - 2, h - 2), Vector2(w - depth, h - depth)
+		])
+		draw_colored_polygon(right_pts, side_color.lerp(Color.BLACK, 0.1))
 
-		# Vertical lines (offset every other row) with shadow
+		# Top face (main slab surface)
+		var top_rect := Rect2(2, 2, w - depth - 2, h - depth - 2)
+		var top_top := base.lerp(Color.WHITE, 0.06)
+		var top_bottom := base.lerp(Color.BLACK, 0.04)
+		VisualTheme.draw_vertical_gradient(self, top_rect, top_top, top_bottom)
+
+		# Stone grain texture (deterministic sin-based pattern)
+		for i in range(5):
+			var gx := sin(float(tile_x * 7 + i * 13)) * 0.5 + 0.5
+			var gy := sin(float(tile_y * 11 + i * 17)) * 0.5 + 0.5
+			var px := top_rect.position.x + gx * top_rect.size.x
+			var py := top_rect.position.y + gy * top_rect.size.y
+			var grain_len := 6.0 + sin(float(i * 23)) * 4.0
+			draw_line(Vector2(px, py), Vector2(px + grain_len, py + 1), VisualTheme.TILE_STONE_GRAIN, 1.0)
+
+		# Specular highlight (top-left corner)
+		var spec := VisualTheme.TILE_SPECULAR
+		spec.a *= (1.0 + lighting * 2.0)
+		draw_line(Vector2(top_rect.position.x + 3, top_rect.position.y + 3),
+			Vector2(top_rect.position.x + 18, top_rect.position.y + 3), spec, 2.0)
+		draw_line(Vector2(top_rect.position.x + 3, top_rect.position.y + 3),
+			Vector2(top_rect.position.x + 3, top_rect.position.y + 14), spec, 1.5)
+
+		# Bevel edges on top face
+		VisualTheme.draw_bevel(self, top_rect, 1.0,
+			Color(1, 1, 1, 0.1 + maxf(lighting, 0.0)),
+			Color(0, 0, 0, 0.15))
+
+	func _draw_wall_tile(w: float, h: float, lighting: float) -> void:
+		var depth := float(VisualTheme.TILE_DEPTH_WALL)
+		var wall_top := VisualTheme.apply_lighting(VisualTheme.TILE_WALL_TOP, lighting)
+
+		# Dark base (visible as depth)
+		draw_rect(Rect2(0, 0, w, h), VisualTheme.TILE_WALL_SIDE)
+
+		# Side faces
+		var side_color := wall_top.lerp(Color.BLACK, 0.5)
+		# Bottom face
+		draw_rect(Rect2(1, h - depth, w - 2, depth - 1), side_color)
+		# Right face
+		draw_rect(Rect2(w - depth, 1, depth - 1, h - 2), side_color.lerp(Color.BLACK, 0.15))
+
+		# Top face
+		var top_rect := Rect2(1, 1, w - depth - 1, h - depth - 1)
+		VisualTheme.draw_vertical_gradient(self, top_rect,
+			wall_top.lerp(Color.WHITE, 0.05), wall_top.lerp(Color.BLACK, 0.1))
+
+		# Mortar pattern on top face
+		var mortar := VisualTheme.TILE_WALL_MORTAR
+		for y_off in [14, 28, 42]:
+			if y_off < top_rect.size.y:
+				draw_line(Vector2(top_rect.position.x + 2, top_rect.position.y + y_off),
+					Vector2(top_rect.end.x - 2, top_rect.position.y + y_off), mortar, 1.5)
 		for row in range(4):
-			var y_start := row * 16
-			var x_offset := 0 if row % 2 == 0 else 16
-			for x in range(0, int(w), 32):
-				var x_pos := x + x_offset
-				if x_pos > 2 and x_pos < w - 2:
-					draw_line(Vector2(x_pos + 1, y_start + 1), Vector2(x_pos + 1, y_start + 15), brick_shadow, 1.0)  # Shadow
-					draw_line(Vector2(x_pos, y_start + 1), Vector2(x_pos, y_start + 15), brick_color, 1.0)
+			var y_start := top_rect.position.y + row * 14
+			var x_offset := 0 if row % 2 == 0 else 14
+			var x := x_offset
+			while x < int(top_rect.size.x):
+				var x_pos := top_rect.position.x + x
+				if x_pos > top_rect.position.x + 2 and x_pos < top_rect.end.x - 2:
+					draw_line(Vector2(x_pos, y_start + 1), Vector2(x_pos, y_start + 13), mortar, 1.0)
+				x += 28
+
+		# Strong bevel
+		VisualTheme.draw_bevel(self, top_rect, 1.5,
+			Color(1, 1, 1, 0.15), Color(0, 0, 0, 0.25))
+
+	func _draw_pit_tile(w: float, h: float, lighting: float) -> void:
+		# Outer crumbling stone rim
+		draw_rect(Rect2(0, 0, w, h), VisualTheme.TILE_PIT_RIM)
+
+		# Crumbling rim texture (jagged inner edge)
+		var rim_width := 8.0
+		for i in range(12):
+			var angle := float(i) / 12.0 * TAU
+			var jag := 2.0 + sin(float(tile_x * 5 + tile_y * 7 + i * 11)) * 3.0
+			var cx := w / 2 + cos(angle) * (w / 2 - rim_width + jag)
+			var cy := h / 2 + sin(angle) * (h / 2 - rim_width + jag)
+			draw_circle(Vector2(cx, cy), 3.0, VisualTheme.TILE_PIT_RIM.lerp(Color.BLACK, 0.3))
+
+		# Void center (black hole)
+		var void_rect := Rect2(rim_width, rim_width, w - rim_width * 2, h - rim_width * 2)
+		draw_rect(void_rect, VisualTheme.TILE_PIT_VOID)
+
+		# Inner void gradient (even darker center)
+		var inner := Rect2(rim_width + 6, rim_width + 6, w - rim_width * 2 - 12, h - rim_width * 2 - 12)
+		draw_rect(inner, VisualTheme.TILE_PIT_VOID.lerp(Color.BLACK, 0.5))
+
+		# Purple glow from below (rings)
+		var center := Vector2(w / 2, h / 2)
+		for i in range(4, 0, -1):
+			var glow := VisualTheme.TILE_PIT_GLOW
+			glow.a = VisualTheme.TILE_PIT_GLOW.a * (1.0 - float(i) / 4.0) * 0.7
+			var r := (w / 2 - rim_width) * (float(i) / 4.0)
+			draw_arc(center, r, 0, TAU, 24, glow, 2.0)
+
+		# Animated-looking glow pulses (deterministic, based on tile coords)
+		var glow_offset := sin(float(tile_x * 3 + tile_y * 5) * 0.7) * 2.0
+		draw_circle(center + Vector2(glow_offset, -glow_offset), 6.0,
+			Color(0.5, 0.2, 0.7, 0.12))
+
+		# Inset shadow around rim
+		VisualTheme.draw_inset(self, Rect2(1, 1, w - 2, h - 2), 2.0)
 
 
 class HighlightDrawer extends Control:
@@ -622,5 +814,62 @@ class HighlightDrawer extends Control:
 		# Extra hover brightness
 		if is_hovered:
 			draw_rect(Rect2(3, 3, w - 6, h - 6), Color(1, 1, 1, 0.15))
+
+
+class BoardFrameDrawer extends Control:
+	"""Ornamental board frame drawn in the COORD_MARGIN area."""
+	var board_size_px: int = 640
+	var margin: int = 24
+
+	func _draw() -> void:
+		var total := board_size_px + margin * 2
+		var w := float(total)
+		var h := float(total)
+		var m := float(margin)
+
+		# === Outer dark wood/stone bars ===
+		# Top bar
+		VisualTheme.draw_vertical_gradient(self, Rect2(0, 0, w, m),
+			VisualTheme.FRAME_WOOD_LIGHT, VisualTheme.FRAME_WOOD)
+		# Bottom bar
+		VisualTheme.draw_vertical_gradient(self, Rect2(0, h - m, w, m),
+			VisualTheme.FRAME_WOOD, VisualTheme.FRAME_WOOD_LIGHT)
+		# Left bar
+		draw_rect(Rect2(0, m, m, h - m * 2), VisualTheme.FRAME_WOOD)
+		# Right bar
+		draw_rect(Rect2(w - m, m, m, h - m * 2), VisualTheme.FRAME_WOOD)
+
+		# === Gold trim lines ===
+		var gold := VisualTheme.FRAME_GOLD_TRIM
+		var gold_dim := VisualTheme.FRAME_GOLD_DIM
+
+		# Outer gold border
+		draw_rect(Rect2(1, 1, w - 2, h - 2), gold, false, 1.5)
+		# Inner gold border (around board area)
+		draw_rect(Rect2(m - 1, m - 1, float(board_size_px) + 2, float(board_size_px) + 2), gold, false, 1.5)
+		# Mid gold accent line
+		draw_rect(Rect2(m / 2, m / 2, w - m, h - m), gold_dim, false, 1.0)
+
+		# === Corner diamond ornaments ===
+		var diamond_size := 5.0
+		var corners := [
+			Vector2(m / 2, m / 2),           # Top-left
+			Vector2(w - m / 2, m / 2),       # Top-right
+			Vector2(m / 2, h - m / 2),       # Bottom-left
+			Vector2(w - m / 2, h - m / 2)    # Bottom-right
+		]
+		for corner: Vector2 in corners:
+			var pts := PackedVector2Array([
+				corner + Vector2(0, -diamond_size),
+				corner + Vector2(diamond_size, 0),
+				corner + Vector2(0, diamond_size),
+				corner + Vector2(-diamond_size, 0)
+			])
+			draw_colored_polygon(pts, VisualTheme.FRAME_DIAMOND)
+			draw_polyline(pts + PackedVector2Array([pts[0]]), gold, 1.0)
+
+		# === Bevel on frame edges ===
+		VisualTheme.draw_bevel(self, Rect2(0, 0, w, h), 1.0,
+			Color(1, 1, 1, 0.08), Color(0, 0, 0, 0.15))
 
 

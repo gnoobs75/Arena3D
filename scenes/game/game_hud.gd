@@ -10,12 +10,15 @@ signal pass_priority_pressed()
 const MAX_MANA := 5
 const CARD_SCENE := preload("res://scenes/game/cards/card_visual.tscn")
 
-# Layout constants
+# Layout constants (defaults, overridden by LayoutManager)
 const MARGIN := 10
-const TOP_BAR_HEIGHT := 160  # Height for AI hand area
-const SIDE_PANEL_WIDTH := 220  # Narrower side panels
+const TOP_BAR_HEIGHT := 0  # No top bar - all info in side panels
+const SIDE_PANEL_WIDTH := 220  # Default side panels (overridden by layout)
 const PORTRAIT_HEIGHT := 200  # Smaller portraits
-const BOTTOM_BAR_HEIGHT := 200  # Hand UI height (increased for larger cards)
+const BOTTOM_BAR_HEIGHT := 160  # Hand UI height
+
+# Cached layout
+var _layout: LayoutManager = null
 
 # UI Elements
 var player1_panel: Control
@@ -23,9 +26,7 @@ var player2_panel: Control
 var _player1_portrait_widgets: Array[ChampionPortrait] = []
 var _player2_portrait_widgets: Array[ChampionPortrait] = []
 
-# Top bar (AI hand)
-var ai_hand_panel: Control
-var ai_hand_container: HBoxContainer
+# AI discard button (in P2 side panel)
 var ai_discard_button: Button
 
 # Turn info and action buttons
@@ -35,6 +36,7 @@ var phase_label: Label
 var round_label: Label
 var end_turn_button: Button
 var undo_button: Button
+var scoreboard_label: Label
 
 # Card preview popup
 var card_preview: Control
@@ -56,6 +58,16 @@ var message_label: Label
 # Floating combat text container
 var combat_text_container: Control
 
+# Card showcase container (for 2-sec center display on cast)
+var card_showcase_container: Control
+
+# Combat scoreboard tracking
+var _top_hit: int = 0
+var _top_hit_attacker: String = ""
+var _top_hit_target: String = ""
+var _turn_damage: Dictionary = {}  # player_id -> total damage this turn
+var _current_turn_player: int = 1
+
 # Combat log
 var combat_log_panel: CombatLogPanel
 var combat_log_button: Button
@@ -72,36 +84,16 @@ func _ready() -> void:
 
 func _create_ui() -> void:
 	"""Create all UI elements."""
-	# === TOP BAR: AI Hand ===
-	ai_hand_panel = _create_ai_hand_bar()
-	ai_hand_panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	ai_hand_panel.offset_top = 0
-	ai_hand_panel.offset_bottom = TOP_BAR_HEIGHT
-	add_child(ai_hand_panel)
-
-	# === LEFT SIDE PANEL (Player 1) ===
+	# === LEFT SIDE PANEL (Player 1 + Turn Info + Action Buttons) ===
 	player1_panel = _create_side_panel(1)
-	player1_panel.position = Vector2(MARGIN, TOP_BAR_HEIGHT + MARGIN)
 	add_child(player1_panel)
 
-	# === RIGHT SIDE PANEL (Player 2) - below turn info ===
+	# === RIGHT SIDE PANEL (Player 2 / AI) ===
 	player2_panel = _create_side_panel(2)
-	player2_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	player2_panel.offset_left = -SIDE_PANEL_WIDTH - MARGIN
-	player2_panel.offset_right = -MARGIN
-	var turn_info_height := 80
-	player2_panel.offset_top = TOP_BAR_HEIGHT + MARGIN + turn_info_height + MARGIN
-	player2_panel.offset_bottom = TOP_BAR_HEIGHT + MARGIN + turn_info_height + MARGIN + _get_side_panel_height()
 	add_child(player2_panel)
 
-	# === TURN INFO BAR (above right side panel) ===
-	turn_info_container = _create_turn_info_bar()
-	turn_info_container.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	turn_info_container.offset_left = -SIDE_PANEL_WIDTH - MARGIN
-	turn_info_container.offset_right = -MARGIN
-	turn_info_container.offset_top = TOP_BAR_HEIGHT + MARGIN
-	turn_info_container.offset_bottom = TOP_BAR_HEIGHT + MARGIN + 80
-	add_child(turn_info_container)
+	# Apply layout positioning (will use defaults if no layout set yet)
+	_apply_panel_positions()
 
 	# === CARD PREVIEW POPUP (hidden by default) ===
 	card_preview = _create_card_preview()
@@ -136,6 +128,12 @@ func _create_ui() -> void:
 	combat_text_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(combat_text_container)
 
+	# === Card showcase container (above combat text) ===
+	card_showcase_container = Control.new()
+	card_showcase_container.set_anchors_preset(Control.PRESET_FULL_RECT)
+	card_showcase_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(card_showcase_container)
+
 	# === Combat Log Panel (hidden by default) ===
 	combat_log_panel = CombatLogPanel.new()
 	add_child(combat_log_panel)
@@ -160,35 +158,22 @@ var _dev_wrappers: Array[DraggableWrapper] = []
 func enable_developer_layout() -> void:
 	"""Enable draggable/resizable panels for Developer Mode.
 	Call after _create_ui() has run (after _ready)."""
-	var side_h := _get_side_panel_height()
 	var tb := DraggableWrapper.TITLE_BAR_HEIGHT
+	var vp := get_viewport().get_visible_rect().size
+	var panel_h := vp.y - BOTTOM_BAR_HEIGHT - MARGIN * 2
 
-	# For anchor-based panels, we must use DraggableWrapper.wrap() with explicit positions
-	# since wrap_existing can't reliably read anchor-resolved positions.
-
-	# === AI Hand (top bar) ===
-	var ai_pos := Vector2(0, 0)
-	var ai_size := Vector2(1920, TOP_BAR_HEIGHT + tb)
-	_rewrap_panel(ai_hand_panel, "ai_hand", "AI Hand", ai_pos, ai_size)
-
-	# === Player 1 sidebar ===
-	var p1_pos := Vector2(MARGIN, TOP_BAR_HEIGHT + MARGIN)
-	var p1_size := Vector2(SIDE_PANEL_WIDTH, side_h + tb)
+	# === Player 1 sidebar (left) ===
+	var p1_pos := Vector2(MARGIN, MARGIN)
+	var p1_size := Vector2(SIDE_PANEL_WIDTH, panel_h + tb)
 	_rewrap_panel(player1_panel, "p1_panel", "Player 1", p1_pos, p1_size)
 
-	# === Player 2 sidebar ===
-	var turn_info_height := 80
-	var p2_pos := Vector2(1920 - SIDE_PANEL_WIDTH - MARGIN, TOP_BAR_HEIGHT + MARGIN + turn_info_height + MARGIN)
-	var p2_size := Vector2(SIDE_PANEL_WIDTH, side_h + tb)
+	# === Player 2 sidebar (right) ===
+	var p2_pos := Vector2(vp.x - SIDE_PANEL_WIDTH - MARGIN, MARGIN)
+	var p2_size := Vector2(SIDE_PANEL_WIDTH, panel_h + tb)
 	_rewrap_panel(player2_panel, "p2_panel", "Player 2", p2_pos, p2_size)
 
-	# === Turn Info ===
-	var ti_pos := Vector2(1920 - SIDE_PANEL_WIDTH - MARGIN, TOP_BAR_HEIGHT + MARGIN)
-	var ti_size := Vector2(SIDE_PANEL_WIDTH, turn_info_height + tb)
-	_rewrap_panel(turn_info_container, "turn_info", "Turn Info", ti_pos, ti_size)
-
 	# === Combat Log ===
-	var cl_pos := Vector2(MARGIN, 1080 - CombatLogPanel.PANEL_HEIGHT - MARGIN)
+	var cl_pos := Vector2(MARGIN, vp.y - CombatLogPanel.PANEL_HEIGHT - MARGIN)
 	var cl_size := Vector2(CombatLogPanel.PANEL_WIDTH, CombatLogPanel.PANEL_HEIGHT + tb)
 	_rewrap_panel(combat_log_panel, "combat_log", "Combat Log", cl_pos, cl_size)
 	combat_log_panel.visible = true
@@ -254,72 +239,58 @@ func _on_reset_layout_pressed() -> void:
 	print("GameHUD: Layout reset to defaults")
 
 
-func _get_side_panel_height() -> float:
-	return PORTRAIT_HEIGHT * 2 + MARGIN * 3 + 80  # 2 portraits + mana + header
+func update_layout(new_layout: LayoutManager) -> void:
+	"""Update panel positions from LayoutManager. Called on init and viewport resize."""
+	_layout = new_layout
+	if _is_ready:
+		_apply_panel_positions()
 
 
-func _create_ai_hand_bar() -> Control:
-	"""Create the AI hand bar at the top (mirrors player hand style)."""
-	var panel := PanelContainer.new()
-	panel.name = "AIHandBar"
+func _apply_panel_positions() -> void:
+	"""Position panels based on current layout."""
+	if _layout == null:
+		var vp := get_viewport().get_visible_rect().size
+		_layout = LayoutManager.new()
+		_layout.calculate(vp)
 
-	var style := StyleBoxFlat.new()
-	style.bg_color = VisualTheme.GRADIENT_PANEL_TOP
-	style.border_color = VisualTheme.PLAYER2_COLOR.lerp(Color.BLACK, 0.4)
-	style.border_width_bottom = 3
-	style.set_content_margin_all(VisualTheme.PADDING_PANEL)
-	style.shadow_color = VisualTheme.SHADOW_COLOR
-	style.shadow_size = 6
-	style.shadow_offset = Vector2(0, 3)
-	panel.add_theme_stylebox_override("panel", style)
+	var left := _layout.left_panel_rect
+	var right := _layout.right_panel_rect
+	var panel_w := left.size.x
 
-	var hbox := HBoxContainer.new()
-	hbox.add_theme_constant_override("separation", VisualTheme.SPACING_LARGE)
-	panel.add_child(hbox)
+	# Left panel - full height of board area
+	if player1_panel:
+		player1_panel.anchor_left = 0
+		player1_panel.anchor_top = 0
+		player1_panel.anchor_right = 0
+		player1_panel.anchor_bottom = 0
+		player1_panel.position = left.position
+		player1_panel.size = Vector2(panel_w, left.size.y)
 
-	# AI Discard pile button
-	ai_discard_button = Button.new()
-	ai_discard_button.text = "AI\nDiscard"
-	ai_discard_button.custom_minimum_size = Vector2(70, 0)
-	ai_discard_button.pressed.connect(_on_ai_discard_clicked)
-	_style_button(ai_discard_button, VisualTheme.PLAYER2_COLOR.lerp(Color.BLACK, 0.5))
-	hbox.add_child(ai_discard_button)
-
-	# Separator
-	var sep := VSeparator.new()
-	hbox.add_child(sep)
-
-	# Cards container
-	var cards_scroll := ScrollContainer.new()
-	cards_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	cards_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	cards_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	hbox.add_child(cards_scroll)
-
-	ai_hand_container = HBoxContainer.new()
-	ai_hand_container.add_theme_constant_override("separation", 8)
-	cards_scroll.add_child(ai_hand_container)
-
-	# AI info label
-	var info_label := Label.new()
-	info_label.name = "AIInfoLabel"
-	info_label.text = "AI Hand"
-	info_label.add_theme_color_override("font_color", VisualTheme.PLAYER2_COLOR)
-	info_label.custom_minimum_size = Vector2(80, 0)
-	hbox.add_child(info_label)
-
-	return panel
+	# Right panel - full height of board area
+	if player2_panel:
+		player2_panel.anchor_left = 0
+		player2_panel.anchor_top = 0
+		player2_panel.anchor_right = 0
+		player2_panel.anchor_bottom = 0
+		player2_panel.position = right.position
+		player2_panel.size = Vector2(panel_w, right.size.y)
 
 
 func _create_side_panel(player_id: int) -> Control:
-	"""Create a compact side panel with player info and portraits."""
+	"""Create a side panel with player info, portraits, and controls.
+	Player 1 (left): includes turn info and action buttons.
+	Player 2 (right): includes AI hand count and discard button."""
 	var panel := PanelContainer.new()
 	panel.name = "Player%dPanel" % player_id
-	panel.custom_minimum_size = Vector2(SIDE_PANEL_WIDTH, _get_side_panel_height())
+	var panel_w: float = SIDE_PANEL_WIDTH
+	if _layout:
+		panel_w = _layout.left_panel_rect.size.x
+	panel.custom_minimum_size = Vector2(panel_w, 0)
+	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 
 	var team_color: Color = VisualTheme.get_player_color(player_id)
 	var style := StyleBoxFlat.new()
-	style.bg_color = VisualTheme.GRADIENT_PANEL_TOP  # Will simulate gradient visually
+	style.bg_color = VisualTheme.GRADIENT_PANEL_TOP
 	style.border_color = team_color.lerp(Color.BLACK, 0.2)
 	style.set_border_width_all(2)
 	style.set_corner_radius_all(8)
@@ -363,7 +334,7 @@ func _create_side_panel(player_id: int) -> Control:
 		gems.add_child(gem)
 	header.add_child(gems)
 
-	# Info label
+	# Info label (hand/deck count)
 	var info := Label.new()
 	info.name = "InfoLabel"
 	info.text = "Hand: 5 | Deck: 35"
@@ -381,8 +352,69 @@ func _create_side_panel(player_id: int) -> Control:
 	portraits.add_theme_constant_override("separation", 8)
 	vbox.add_child(portraits)
 
-	# Discard button (for player 1 only, AI discard is in top bar)
+	# === Player-specific sections ===
 	if player_id == 1:
+		# --- Turn Info Section (integrated into P1 panel) ---
+		var turn_sep := HSeparator.new()
+		vbox.add_child(turn_sep)
+
+		# Turn info container for update_layout reference
+		turn_info_container = VBoxContainer.new()
+		turn_info_container.add_theme_constant_override("separation", VisualTheme.SPACING_MEDIUM)
+		vbox.add_child(turn_info_container)
+
+		var info_row := HBoxContainer.new()
+		info_row.alignment = BoxContainer.ALIGNMENT_CENTER
+		info_row.add_theme_constant_override("separation", 8)
+		turn_info_container.add_child(info_row)
+
+		round_label = Label.new()
+		round_label.text = "Round 1"
+		round_label.add_theme_font_size_override("font_size", 11)
+		round_label.add_theme_color_override("font_color", Color(0.6, 0.6, 0.65))
+		info_row.add_child(round_label)
+
+		turn_label = Label.new()
+		turn_label.text = "Your Turn"
+		turn_label.add_theme_font_size_override("font_size", 13)
+		turn_label.add_theme_color_override("font_color", VisualTheme.PLAYER1_COLOR)
+		info_row.add_child(turn_label)
+
+		phase_label = Label.new()
+		phase_label.text = "ACTION"
+		phase_label.add_theme_font_size_override("font_size", 11)
+		phase_label.add_theme_color_override("font_color", VisualTheme.UI_ACCENT)
+		info_row.add_child(phase_label)
+
+		# Scoreboard row
+		scoreboard_label = Label.new()
+		scoreboard_label.text = ""
+		scoreboard_label.add_theme_font_size_override("font_size", 10)
+		scoreboard_label.add_theme_color_override("font_color", Color(0.9, 0.7, 0.3))
+		scoreboard_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		turn_info_container.add_child(scoreboard_label)
+
+		# Action buttons
+		var btn_row := HBoxContainer.new()
+		btn_row.alignment = BoxContainer.ALIGNMENT_CENTER
+		btn_row.add_theme_constant_override("separation", 8)
+		turn_info_container.add_child(btn_row)
+
+		end_turn_button = Button.new()
+		end_turn_button.text = "END TURN"
+		end_turn_button.custom_minimum_size = Vector2(100, 32)
+		end_turn_button.pressed.connect(_on_end_turn_pressed)
+		_style_button(end_turn_button, VisualTheme.PLAYER1_COLOR.lerp(Color.BLACK, 0.3))
+		btn_row.add_child(end_turn_button)
+
+		undo_button = Button.new()
+		undo_button.text = "UNDO"
+		undo_button.custom_minimum_size = Vector2(60, 28)
+		undo_button.pressed.connect(_on_undo_pressed)
+		_style_button(undo_button, Color(0.4, 0.35, 0.25))
+		btn_row.add_child(undo_button)
+
+		# Discard pile viewer button
 		var discard_btn := Button.new()
 		discard_btn.name = "DiscardButton"
 		discard_btn.text = "View Discard"
@@ -391,71 +423,22 @@ func _create_side_panel(player_id: int) -> Control:
 		_style_button(discard_btn, Color(0.3, 0.3, 0.35))
 		vbox.add_child(discard_btn)
 
-	return panel
+	else:
+		# --- Player 2 / AI: discard button ---
+		var ai_sep := HSeparator.new()
+		vbox.add_child(ai_sep)
 
-
-func _create_turn_info_bar() -> Control:
-	"""Create turn info bar with action buttons."""
-	var panel := PanelContainer.new()
-
-	var style := StyleBoxFlat.new()
-	style.bg_color = VisualTheme.GRADIENT_PANEL_TOP
-	style.border_color = VisualTheme.UI_ACCENT.lerp(Color.BLACK, 0.5)
-	style.set_border_width_all(2)
-	style.set_corner_radius_all(8)
-	style.set_content_margin_all(VisualTheme.PADDING_PANEL)
-	style.shadow_color = VisualTheme.SHADOW_HARD
-	style.shadow_size = 8
-	style.shadow_offset = Vector2(3, 3)
-	panel.add_theme_stylebox_override("panel", style)
-
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", VisualTheme.SPACING_MEDIUM)
-	panel.add_child(vbox)
-
-	# Turn info row
-	var info_row := HBoxContainer.new()
-	info_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	info_row.add_theme_constant_override("separation", 15)
-	vbox.add_child(info_row)
-
-	round_label = Label.new()
-	round_label.text = "Round 1"
-	round_label.add_theme_color_override("font_color", Color(0.6, 0.6, 0.65))
-	info_row.add_child(round_label)
-
-	turn_label = Label.new()
-	turn_label.text = "Player 1's Turn"
-	turn_label.add_theme_font_size_override("font_size", 14)
-	turn_label.add_theme_color_override("font_color", VisualTheme.PLAYER1_COLOR)
-	info_row.add_child(turn_label)
-
-	phase_label = Label.new()
-	phase_label.text = "ACTION"
-	phase_label.add_theme_color_override("font_color", VisualTheme.UI_ACCENT)
-	info_row.add_child(phase_label)
-
-	# Buttons row
-	var btn_row := HBoxContainer.new()
-	btn_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	btn_row.add_theme_constant_override("separation", 10)
-	vbox.add_child(btn_row)
-
-	end_turn_button = Button.new()
-	end_turn_button.text = "END TURN"
-	end_turn_button.custom_minimum_size = Vector2(100, 30)
-	end_turn_button.pressed.connect(_on_end_turn_pressed)
-	_style_button(end_turn_button, Color(0.2, 0.5, 0.3))
-	btn_row.add_child(end_turn_button)
-
-	undo_button = Button.new()
-	undo_button.text = "UNDO"
-	undo_button.custom_minimum_size = Vector2(70, 30)
-	undo_button.pressed.connect(_on_undo_pressed)
-	_style_button(undo_button, Color(0.4, 0.35, 0.25))
-	btn_row.add_child(undo_button)
+		ai_discard_button = Button.new()
+		ai_discard_button.name = "AIDiscardButton"
+		ai_discard_button.text = "View AI Discard"
+		ai_discard_button.custom_minimum_size = Vector2(0, 25)
+		ai_discard_button.pressed.connect(_on_ai_discard_clicked)
+		_style_button(ai_discard_button, VisualTheme.PLAYER2_COLOR.lerp(Color.BLACK, 0.5))
+		vbox.add_child(ai_discard_button)
 
 	return panel
+
+
 
 
 func _create_card_preview() -> Control:
@@ -638,7 +621,6 @@ func update_display() -> void:
 	_update_side_panel(player1_panel, 1)
 	_update_side_panel(player2_panel, 2)
 	_update_turn_info()
-	_update_ai_hand()
 
 
 func _update_side_panel(panel: Control, player_id: int) -> void:
@@ -719,9 +701,18 @@ func _update_side_panel(panel: Control, player_id: int) -> void:
 		for i in range(champions.size(), widgets.size()):
 			widgets[i].visible = false
 
-	# Dim inactive player's panel
+	# Active player gets bright modulate, inactive dims
 	var is_active := game_state.active_player == player_id
-	panel.modulate = Color.WHITE if is_active else Color(0.7, 0.7, 0.75)
+	if is_active:
+		panel.modulate = Color.WHITE
+		# Update border to glow with team color
+		var active_style := (panel as PanelContainer).get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+		if active_style:
+			active_style.border_color = VisualTheme.get_player_color(player_id)
+			active_style.set_border_width_all(3)
+			(panel as PanelContainer).add_theme_stylebox_override("panel", active_style)
+	else:
+		panel.modulate = Color(0.7, 0.7, 0.75)
 
 
 func _update_turn_info() -> void:
@@ -737,50 +728,6 @@ func _update_turn_info() -> void:
 		round_label.text = "Round %d" % game_state.round_number
 
 
-func _update_ai_hand() -> void:
-	if ai_hand_container == null or game_state == null:
-		return
-
-	# Clear existing
-	for child in ai_hand_container.get_children():
-		child.queue_free()
-
-	var ai_hand := game_state.get_hand(2)
-	var ai_mana := game_state.get_mana(2)
-
-	# Update info label in top bar
-	var info_label: Label = ai_hand_panel.get_node_or_null("*/AIInfoLabel")
-	if info_label == null:
-		# Try to find it differently
-		for child in ai_hand_panel.get_children():
-			if child is HBoxContainer:
-				info_label = child.get_node_or_null("AIInfoLabel")
-				break
-	if info_label:
-		info_label.text = "AI: %d cards\n%d mana" % [ai_hand.size(), ai_mana]
-
-	# Add full-sized cards
-	for card_name: String in ai_hand:
-		var card_visual: CardVisual = CARD_SCENE.instantiate()
-		var cost: int = CardDatabase.get_card(card_name).get("cost", 0)
-		var is_playable: bool = cost <= ai_mana
-		card_visual.setup(card_name, is_playable, false)  # Face up for debugging
-		card_visual.card_hovered.connect(_on_ai_card_hovered)
-		card_visual.card_unhovered.connect(_on_ai_card_unhovered)
-		ai_hand_container.add_child(card_visual)
-
-
-func _on_ai_card_hovered(card_name: String) -> void:
-	"""Show large preview when hovering AI card."""
-	if card_preview and card_preview_visual:
-		card_preview_visual.setup(card_name, true, false)
-		card_preview.visible = true
-
-
-func _on_ai_card_unhovered(_card_name: String) -> void:
-	"""Hide preview when not hovering."""
-	if card_preview:
-		card_preview.visible = false
 
 
 func _on_player_discard_clicked() -> void:
@@ -845,34 +792,243 @@ func clear_selection() -> void:
 		portrait.set_selected(false)
 
 
-func show_combat_text(text: String, screen_pos: Vector2, color: Color = Color.WHITE, is_damage: bool = true) -> void:
+func show_combat_text(text: String, screen_pos: Vector2, color: Color = Color.WHITE, is_damage: bool = true, is_critical: bool = false) -> void:
 	if combat_text_container == null:
 		return
 	var combat_text := FloatingCombatText.new()
-	combat_text.setup(text, screen_pos, color, is_damage)
+	combat_text.setup(text, screen_pos, color, is_damage, is_critical)
 	combat_text_container.add_child(combat_text)
 
 
 func show_damage_number(amount: int, screen_pos: Vector2) -> void:
-	show_combat_text("-%d" % amount, screen_pos, Color(1.0, 0.3, 0.3), true)
+	var is_critical := amount >= VisualTheme.COMBAT_FLASH_THRESHOLD
+	show_combat_text("-%d" % amount, screen_pos, Color(1.0, 0.3, 0.3), true, is_critical)
+	# Screen shake for big hits
+	if amount >= VisualTheme.COMBAT_SHAKE_THRESHOLD and UIAnimator:
+		UIAnimator.screen_shake(3.0 + amount * 0.5, 0.2)
+	# Red flash for heavy damage
+	if is_critical and UIAnimator:
+		UIAnimator.screen_flash(VisualTheme.FLASH_DAMAGE, 0.3)
 
 
 func show_heal_number(amount: int, screen_pos: Vector2) -> void:
 	show_combat_text("+%d" % amount, screen_pos, Color(0.3, 1.0, 0.3), false)
+	# Subtle green flash for heals
+	if amount >= 3 and UIAnimator:
+		UIAnimator.screen_flash(VisualTheme.FLASH_HEAL, 0.25)
+
+
+## === CHAMPION TAUNTS ===
+## Champion-specific trash talk triggered on big hits and kills
+
+# Generic taunts for any champion landing a big hit (4+ damage)
+const GENERIC_BIG_HIT_TAUNTS := [
+	"Is that all you've got?!",
+	"You call that armor?",
+	"Didn't even break a sweat!",
+	"Stay down!",
+	"That's gonna leave a mark!",
+	"Feel the pain!",
+	"Too slow!",
+	"Should've dodged!",
+	"Pathetic!",
+	"You're done!",
+]
+
+# Generic kill taunts
+const GENERIC_KILL_TAUNTS := [
+	"ELIMINATED!",
+	"Another one bites the dust!",
+	"That's a wrap!",
+	"Sleep tight!",
+	"Game over for you!",
+]
+
+# Champion-specific taunts: attacker -> { target -> [taunts] }
+const CHAMPION_TAUNTS := {
+	"Brute": {
+		"_default": ["SMASH!", "Brute force!", "Too easy!", "You're just a speed bump!"],
+		"Burglar": ["Come out of the shadows, coward!", "Can't hide from THESE fists!", "Sneaky won't save you!"],
+		"Ranger": ["Get over here!", "Arrows tickle!", "You can't run forever!"],
+		"Illusionist": ["Mirrors can't stop me!", "Which one bleeds? ALL of them!"],
+		"DarkWizard": ["Your magic is NOTHING!", "I'll crush your skull AND your spells!"],
+	},
+	"Ranger": {
+		"_default": ["Bullseye!", "Right between the eyes!", "Never saw it coming!", "From downtown!"],
+		"Brute": ["Catch this! Oh wait, you can't.", "Big target, easy shot!", "All muscle, no dodge!"],
+		"Beast": ["Bad dog! Stay!", "Nice fur... I'll make a rug!", "Heel, boy!"],
+		"Berserker": ["Rage all you want from over there!", "Slow and angry, my favorite target!"],
+	},
+	"Beast": {
+		"_default": ["RAWR!", "Nature's fury!", "The wild hungers!", "Tooth and claw!"],
+		"Shaman": ["The spirits won't save you!", "Your totems are kindling!"],
+		"Redeemer": ["Your light fades!", "Pray harder!"],
+		"Alchemist": ["Your potions taste terrible!", "No formula for THIS!"],
+	},
+	"Redeemer": {
+		"_default": ["By the light!", "Justice is served!", "Purified!", "The light condemns you!"],
+		"DarkWizard": ["Darkness yields to light!", "Your shadows have no power here!"],
+		"Confessor": ["Your faith is misguided!", "Repent!", "False prophet!"],
+		"Berserker": ["Calm yourself... permanently!", "Rage is not strength!"],
+	},
+	"Confessor": {
+		"_default": ["Confess your sins!", "Judgment has come!", "The chains tighten!", "Suffer!"],
+		"Redeemer": ["Your light blinds only yourself!", "Mercy is weakness!"],
+		"Shaman": ["Primitive superstition!", "Your spirits answer to ME now!"],
+	},
+	"Barbarian": {
+		"_default": ["FOR GLORY!", "Blood and thunder!", "WAR!", "The axe speaks!"],
+		"Brute": ["I'm the REAL warrior here!", "Amateur!", "You fight like a child!"],
+		"Burglar": ["Fight me face to face!", "Coward! Stand and fight!"],
+	},
+	"Burglar": {
+		"_default": ["Didn't see that coming!", "From the shadows!", "Pick pocket, pick LIFE!", "Surprise!"],
+		"Shaman": ["Your spirits need glasses!", "Saw that hex coming a mile away!"],
+		"Brute": ["Brains over brawn!", "Catch me if you can, big guy!"],
+		"Barbarian": ["All that rage and you still missed!", "Too predictable!"],
+		"Ranger": ["I can dodge arrows in my sleep!", "Nice aim... NOT!"],
+	},
+	"Berserker": {
+		"_default": ["RAAAAAAGE!", "BLOOD!", "MORE!", "I'LL DESTROY EVERYTHING!", "PAIN IS FUEL!"],
+		"Redeemer": ["Your healing won't save you!", "LIGHT BURNS BUT I BURN HOTTER!"],
+		"Confessor": ["CHAINS? I'LL BREAK THEM ALL!", "YOUR JUDGMENT MEANS NOTHING!"],
+	},
+	"Shaman": {
+		"_default": ["The spirits strike!", "Elements, hear me!", "Nature's wrath!", "By totem and bone!"],
+		"DarkWizard": ["Light magic trumps dark!", "The spirits reject your corruption!"],
+		"Illusionist": ["The spirits see through your tricks!", "Illusions don't fool the wind!"],
+		"Alchemist": ["Nature needs no laboratory!", "Your science is inferior!"],
+	},
+	"Illusionist": {
+		"_default": ["Now you see me!", "Was that real? Does it matter?", "Confusion is my weapon!", "Mirror match!"],
+		"Ranger": ["Can you hit what isn't there?", "Aim at THIS... no, THAT one!"],
+		"Barbarian": ["Rage at the mirror, fool!", "Swing away... at nothing!"],
+	},
+	"DarkWizard": {
+		"_default": ["Darkness consumes!", "Your soul is MINE!", "Embrace the void!", "The shadows hunger!"],
+		"Redeemer": ["Your light is a candle in a hurricane!", "Faith won't shield you from THIS!"],
+		"Shaman": ["Your spirits kneel before me!", "Primitive magic!"],
+		"Ranger": ["Arrows? Against MAGIC?", "You can't shoot what you can't see!"],
+	},
+	"Alchemist": {
+		"_default": ["Science prevails!", "Experiment successful!", "Formula complete!", "Boom! Chemistry!"],
+		"Shaman": ["Superstition vs science... science wins!", "Your 'spirits' are just gases!"],
+		"DarkWizard": ["Magic is just unexplained science!", "I've already analyzed your spells!"],
+		"Beast": ["Fascinating specimen!", "Hold still, I need samples!"],
+	},
+}
+
+
+func show_taunt(attacker_name: String, target_name: String, damage: int, is_kill: bool) -> void:
+	"""Show a champion-specific taunt as floating text near the board center."""
+	var taunt: String = ""
+
+	if is_kill:
+		# Kill taunts take priority
+		var champ_taunts: Dictionary = CHAMPION_TAUNTS.get(attacker_name, {})
+		var specific_taunts: Array = champ_taunts.get(target_name, champ_taunts.get("_default", []))
+		if not specific_taunts.is_empty():
+			taunt = specific_taunts[randi() % specific_taunts.size()]
+		else:
+			taunt = GENERIC_KILL_TAUNTS[randi() % GENERIC_KILL_TAUNTS.size()]
+	elif damage >= 4:
+		# Big hit taunts
+		var champ_taunts: Dictionary = CHAMPION_TAUNTS.get(attacker_name, {})
+		var specific_taunts: Array = champ_taunts.get(target_name, champ_taunts.get("_default", []))
+		if not specific_taunts.is_empty():
+			taunt = specific_taunts[randi() % specific_taunts.size()]
+		else:
+			taunt = GENERIC_BIG_HIT_TAUNTS[randi() % GENERIC_BIG_HIT_TAUNTS.size()]
+
+	if taunt.is_empty():
+		return
+
+	# Show taunt as floating text in center-ish area, slightly randomized
+	var vp_center := get_viewport().get_visible_rect().size / 2.0
+	var center := Vector2(vp_center.x, vp_center.y - 140) + Vector2(randf_range(-80, 80), randf_range(-30, 30))
+	var taunt_text := FloatingTauntText.new()
+	taunt_text.setup(taunt, center, attacker_name)
+	if combat_text_container:
+		combat_text_container.add_child(taunt_text)
+
+
+## === CARD SHOWCASE ===
+## When a card is cast (especially by AI), show it center screen for 2 seconds
+
+func show_card_showcase(card_name: String, caster_name: String) -> void:
+	"""Show a card at center screen for 2 seconds so the player can see what was played."""
+	if card_showcase_container == null:
+		return
+	var showcase := CardShowcase.new()
+	showcase.setup(card_name, caster_name)
+	card_showcase_container.add_child(showcase)
+
+
+## === COMBAT SCOREBOARD ===
+
+func track_damage(_attacker_id: String, _target_id: String, amount: int, attacker_name: String, target_name: String) -> void:
+	"""Track damage for scoreboard stats."""
+	if amount <= 0:
+		return
+	# Track top hit
+	if amount > _top_hit:
+		_top_hit = amount
+		_top_hit_attacker = attacker_name
+		_top_hit_target = target_name
+	# Track turn damage
+	_turn_damage[_current_turn_player] = _turn_damage.get(_current_turn_player, 0) + amount
+	# Update scoreboard display
+	if scoreboard_label:
+		scoreboard_label.text = get_top_hit_text()
+
+
+func reset_turn_damage(player_id: int) -> void:
+	"""Reset per-turn damage tracking at start of turn."""
+	_current_turn_player = player_id
+	_turn_damage[player_id] = 0
+
+
+func get_top_hit_text() -> String:
+	if _top_hit <= 0:
+		return ""
+	return "Top Hit: %d (%s > %s)" % [_top_hit, _top_hit_attacker, _top_hit_target]
+
+
+func get_turn_damage(player_id: int) -> int:
+	return _turn_damage.get(player_id, 0)
 
 
 func show_turn_banner(player_id: int) -> void:
-	"""Dramatic turn start banner that slides across screen."""
+	"""Dramatic turn start banner with team color and larger text."""
+	var team_color := VisualTheme.get_player_color(player_id)
+	var banner_height := VisualTheme.TURN_BANNER_HEIGHT
+
 	var banner := ColorRect.new()
-	banner.color = VisualTheme.get_player_color(player_id).lerp(Color.BLACK, 0.3)
-	banner.color.a = 0.9
+	banner.color = team_color.lerp(Color.BLACK, 0.35)
+	banner.color.a = 0.92
 	banner.set_anchors_preset(Control.PRESET_CENTER)
-	banner.offset_left = -400
-	banner.offset_right = 400
-	banner.offset_top = -35
-	banner.offset_bottom = 35
+	banner.offset_left = -500
+	banner.offset_right = 500
+	banner.offset_top = -banner_height / 2
+	banner.offset_bottom = banner_height / 2
 	banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(banner)
+
+	# Top gold trim line
+	var trim_top := ColorRect.new()
+	trim_top.color = VisualTheme.FRAME_GOLD_TRIM
+	trim_top.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	trim_top.offset_bottom = 2
+	trim_top.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	banner.add_child(trim_top)
+
+	# Bottom gold trim line
+	var trim_bottom := ColorRect.new()
+	trim_bottom.color = VisualTheme.FRAME_GOLD_TRIM
+	trim_bottom.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	trim_bottom.offset_top = -2
+	trim_bottom.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	banner.add_child(trim_bottom)
 
 	var label := Label.new()
 	var player_name := "YOUR TURN" if player_id == 1 else "AI TURN"
@@ -880,19 +1036,23 @@ func show_turn_banner(player_id: int) -> void:
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	label.set_anchors_preset(Control.PRESET_FULL_RECT)
-	label.add_theme_font_size_override("font_size", 28)
+	label.add_theme_font_size_override("font_size", VisualTheme.TURN_BANNER_FONT)
 	label.add_theme_color_override("font_color", Color.WHITE)
+	label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.6))
+	label.add_theme_constant_override("shadow_offset_x", 2)
+	label.add_theme_constant_override("shadow_offset_y", 2)
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	banner.add_child(label)
 
 	# Slide in from right, hold, slide out left
-	banner.position.x = 1920
+	var vp_width := get_viewport().get_visible_rect().size.x
+	banner.position.x = vp_width
 	banner.modulate.a = 0.0
 	var tween := create_tween()
 	tween.tween_property(banner, "position:x", 0.0, 0.25).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
 	tween.parallel().tween_property(banner, "modulate:a", 1.0, 0.15)
-	tween.tween_interval(0.6)
-	tween.tween_property(banner, "position:x", -1920.0, 0.25).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_CUBIC)
+	tween.tween_interval(0.7)
+	tween.tween_property(banner, "position:x", -vp_width, 0.25).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_CUBIC)
 	tween.parallel().tween_property(banner, "modulate:a", 0.0, 0.2)
 	tween.tween_callback(banner.queue_free)
 
@@ -1015,10 +1175,18 @@ class ManaGem extends Control:
 	var is_bonus: bool = false
 	var _was_filled: bool = true  # Track for fill/drain animation
 	var _anim_scale: float = 1.0
+	var _sparkle_time: float = 0.0
 
 	func _init() -> void:
 		custom_minimum_size = Vector2(22, 22)
 		pivot_offset = Vector2(11, 11)
+
+	func _process(delta: float) -> void:
+		if is_filled:
+			_sparkle_time += delta
+			# Redraw periodically for sparkle effect
+			if fmod(_sparkle_time, 0.1) < delta:
+				queue_redraw()
 
 	func set_filled(filled: bool) -> void:
 		var changed := is_filled != filled
@@ -1093,6 +1261,13 @@ class ManaGem extends Control:
 				for i in range(3, 0, -1):
 					var glow_alpha := 0.1 * (1.0 - float(i) / 3.0)
 					draw_arc(center, radius + i, 0, TAU, 24, Color(0.4, 0.6, 1.0, glow_alpha), 1.5)
+
+			# Sparkle point (travels around the gem)
+			var sparkle_angle := _sparkle_time * 2.5
+			var sparkle_r := radius - 3.0
+			var sparkle_pos := center + Vector2(cos(sparkle_angle), sin(sparkle_angle)) * sparkle_r
+			var sparkle_alpha := (sin(_sparkle_time * 5.0) + 1.0) * 0.25
+			draw_circle(sparkle_pos, 1.5, Color(1, 1, 1, sparkle_alpha))
 		else:
 			# Empty gem - recessed/inset look
 			var outer_color := VisualTheme.GRADIENT_MANA_EMPTY_BOTTOM
@@ -1134,8 +1309,12 @@ class ChampionPortrait extends Control:
 
 	func _process(delta: float) -> void:
 		_glow_timer += delta * 3.0
-		if _is_selected or (champion and (not champion.buffs.is_empty() or not champion.equipment.is_empty())):
+		if _is_selected or (champion and (not champion.buffs.is_empty() or not champion.debuffs.is_empty() or not champion.equipment.is_empty())):
 			queue_redraw()
+		# Update tooltip dynamically based on mouse position over status icons
+		var tip := _get_tooltip_text()
+		if tip != tooltip_text:
+			tooltip_text = tip
 
 	func set_selected(selected: bool) -> void:
 		_is_selected = selected
@@ -1153,7 +1332,10 @@ class ChampionPortrait extends Control:
 		queue_redraw()
 
 	func _update_size() -> void:
-		custom_minimum_size = Vector2(WIDTH, HEIGHT + _get_equipment_height())
+		var status_height := 0.0
+		if champion and (not champion.buffs.is_empty() or not champion.debuffs.is_empty()):
+			status_height = 40.0
+		custom_minimum_size = Vector2(WIDTH, HEIGHT + status_height + _get_equipment_height())
 
 	func _load_portrait_texture() -> void:
 		"""Load the portrait texture for this champion."""
@@ -1196,6 +1378,23 @@ class ChampionPortrait extends Control:
 
 		# Bevel on frame
 		VisualTheme.draw_bevel(self, Rect2(0, 0, w, h), 1.5)
+
+		# Ornamental gold corners
+		if is_alive:
+			var gold := VisualTheme.FRAME_GOLD_TRIM
+			var corner_len := 12.0
+			# Top-left
+			draw_line(Vector2(2, 2), Vector2(2 + corner_len, 2), gold, 1.5)
+			draw_line(Vector2(2, 2), Vector2(2, 2 + corner_len), gold, 1.5)
+			# Top-right
+			draw_line(Vector2(w - 2, 2), Vector2(w - 2 - corner_len, 2), gold, 1.5)
+			draw_line(Vector2(w - 2, 2), Vector2(w - 2, 2 + corner_len), gold, 1.5)
+			# Bottom-left
+			draw_line(Vector2(2, h - 2), Vector2(2 + corner_len, h - 2), gold, 1.5)
+			draw_line(Vector2(2, h - 2), Vector2(2, h - 2 - corner_len), gold, 1.5)
+			# Bottom-right
+			draw_line(Vector2(w - 2, h - 2), Vector2(w - 2 - corner_len, h - 2), gold, 1.5)
+			draw_line(Vector2(w - 2, h - 2), Vector2(w - 2, h - 2 - corner_len), gold, 1.5)
 
 		# Inner background with gradient
 		var inner := Rect2(3, 3, w - 6, h - 6)
@@ -1248,8 +1447,9 @@ class ChampionPortrait extends Control:
 		VisualTheme.draw_text_shadow(self, font, Vector2(12, y + 17), champion.champion_name.to_upper(), 12, name_col)
 		y += 30
 
-		# HP bar with shadow and gradient
-		var hp_rect := Rect2(8, y, w - 16, 18)
+		# Enhanced HP bar - taller with tick marks and danger pulse
+		var hp_bar_h := float(VisualTheme.HP_BAR_HEIGHT_ENHANCED)
+		var hp_rect := Rect2(8, y, w - 16, hp_bar_h)
 		# HP bar shadow
 		draw_rect(Rect2(hp_rect.position + Vector2(1, 1), hp_rect.size), VisualTheme.SHADOW_SOFT)
 		# HP bar background
@@ -1265,9 +1465,22 @@ class ChampionPortrait extends Control:
 			# Shine on HP bar
 			draw_line(Vector2(hp_fill.position.x, hp_fill.position.y + 2), Vector2(hp_fill.end.x, hp_fill.position.y + 2), Color(1, 1, 1, 0.25), 1.0)
 
+			# Danger pulse when low HP
+			if hp_pct <= VisualTheme.HP_DANGER_THRESHOLD and is_alive:
+				var danger_pulse := (sin(_glow_timer * 4.0) + 1.0) * 0.5
+				draw_rect(hp_fill, Color(1.0, 0.2, 0.1, 0.15 * danger_pulse))
+
+		# Tick marks every N HP
+		if champion.max_hp > 0:
+			var tick_interval := VisualTheme.HP_TICK_INTERVAL
+			var bar_inner_w := hp_rect.size.x - 2
+			for tick_hp in range(tick_interval, champion.max_hp, tick_interval):
+				var tick_x := hp_rect.position.x + 1 + bar_inner_w * (float(tick_hp) / float(champion.max_hp))
+				draw_line(Vector2(tick_x, hp_rect.position.y + 1), Vector2(tick_x, hp_rect.end.y - 1), Color(0, 0, 0, 0.3), 1.0)
+
 		draw_rect(hp_rect, Color(0.35, 0.35, 0.4), false, 1.0)
-		VisualTheme.draw_text_shadow(self, font, Vector2(w / 2 - 16, y + 14), "%d/%d" % [champion.current_hp, champion.max_hp], 11, Color.WHITE)
-		y += 24
+		VisualTheme.draw_text_shadow(self, font, Vector2(w / 2 - 16, y + hp_bar_h - 4), "%d/%d" % [champion.current_hp, champion.max_hp], 11, Color.WHITE)
+		y += int(hp_bar_h) + 4
 
 		# Stats with shadows and spacing
 		var stat_w := (w - 24) / 3.0
@@ -1275,6 +1488,35 @@ class ChampionPortrait extends Control:
 		_draw_stat(font, 8, y, stat_w, "PWR", champion.current_power, _base_power, Color(0.85, 0.3, 0.25), is_alive)
 		_draw_stat(font, 8 + stat_w + stat_gap, y, stat_w, "RNG", champion.current_range, _base_range, Color(0.3, 0.55, 0.85), is_alive)
 		_draw_stat(font, 8 + (stat_w + stat_gap) * 2, y, stat_w, "MOV", champion.current_movement, _base_movement, Color(0.3, 0.75, 0.4), is_alive)
+
+		# Status effects section (buffs/debuffs)
+		if is_alive:
+			var status_icons := _get_status_icons()
+			if not status_icons.is_empty():
+				y += 22
+				var icon_x := 10.0
+				for icon_data: Dictionary in status_icons:
+					var icon_col: Color = icon_data["color"]
+					var icon_symbol: String = icon_data["symbol"]
+					var is_debuff: bool = icon_data.get("is_debuff", false)
+
+					# Icon background circle
+					var bg := Color(0.15, 0.12, 0.2, 0.8) if is_debuff else Color(0.12, 0.18, 0.12, 0.8)
+					draw_circle(Vector2(icon_x + 8, y + 8), 9.0, bg)
+					draw_arc(Vector2(icon_x + 8, y + 8), 9.0, 0, TAU, 12, icon_col.lerp(Color.WHITE, 0.3), 1.0)
+
+					# Icon symbol
+					VisualTheme.draw_text_shadow(self, font, Vector2(icon_x + 3, y + 13), icon_symbol, 11, icon_col)
+
+					# Duration text (small, below icon)
+					var dur_text: String = icon_data.get("duration_text", "")
+					if not dur_text.is_empty():
+						VisualTheme.draw_text_shadow(self, font, Vector2(icon_x + 2, y + 22), dur_text, 7, Color(0.7, 0.7, 0.7))
+
+					icon_x += 22.0
+					if icon_x > w - 20:
+						break
+				y += 18
 
 		# Equipment section
 		if not champion.equipment.is_empty() and is_alive:
@@ -1339,6 +1581,131 @@ class ChampionPortrait extends Control:
 		VisualTheme.draw_text_shadow(self, font, Vector2(x + w / 2 - 6, y + 29), str(current), VisualTheme.FONT_STAT_VALUE, val_col)
 
 
+	func _get_status_icons() -> Array[Dictionary]:
+		"""Build list of status effect icons from champion's active buffs/debuffs."""
+		var icons: Array[Dictionary] = []
+		if champion == null:
+			return icons
+
+		# Debuffs (red/purple icons)
+		for debuff_name: String in champion.debuffs:
+			var debuff_data: Dictionary = champion.debuffs[debuff_name]
+			var dur: int = int(debuff_data.get("duration", 0))
+			var dur_text := ""
+			if dur > 0:
+				dur_text = "%dt" % dur
+			elif dur == 0:
+				dur_text = "turn"
+
+			var icon := {"is_debuff": true, "name": debuff_name, "duration_text": dur_text}
+			match debuff_name:
+				"blinded":
+					icon["symbol"] = "X"
+					icon["color"] = Color(0.7, 0.2, 0.8)
+					icon["tooltip"] = "Blinded - Cannot attack"
+				"hypnotized":
+					icon["symbol"] = "S"
+					icon["color"] = Color(0.5, 0.5, 0.55)
+					icon["tooltip"] = "Petrified - Pay 2 mana to break free"
+					icon["duration_text"] = "2g"
+				"canMove":
+					icon["symbol"] = "M"
+					icon["color"] = Color(0.8, 0.4, 0.2)
+					icon["tooltip"] = "Immobilized - Cannot move"
+				"canAttack":
+					icon["symbol"] = "A"
+					icon["color"] = Color(0.9, 0.25, 0.25)
+					icon["tooltip"] = "Disarmed - Cannot attack"
+				"canCast":
+					icon["symbol"] = "C"
+					icon["color"] = Color(0.6, 0.2, 0.9)
+					icon["tooltip"] = "Silenced - Cannot cast spells"
+				"powerLocked":
+					icon["symbol"] = "P"
+					icon["color"] = Color(0.6, 0.15, 0.15)
+					icon["tooltip"] = "Power suppressed to 0"
+				"noHeal":
+					icon["symbol"] = "H"
+					icon["color"] = Color(0.5, 0.15, 0.15)
+					icon["tooltip"] = "Cannot be healed"
+				_:
+					icon["symbol"] = "D"
+					icon["color"] = Color(0.7, 0.3, 0.3)
+					icon["tooltip"] = debuff_name
+			icons.append(icon)
+
+		# Buffs (green/gold icons)
+		for buff_name: String in champion.buffs:
+			var buff_data: Dictionary = champion.buffs[buff_name]
+			var dur: int = int(buff_data.get("duration", 0))
+			var dur_text := ""
+			if dur > 0:
+				dur_text = "%dt" % dur
+			elif dur == 0:
+				dur_text = "turn"
+
+			var icon := {"is_debuff": false, "name": buff_name, "duration_text": dur_text}
+			match buff_name:
+				"immune":
+					icon["symbol"] = "I"
+					icon["color"] = Color(1.0, 0.85, 0.3)
+					icon["tooltip"] = "Immune - Cannot be targeted or damaged"
+				"extraAttack":
+					icon["symbol"] = "+"
+					icon["color"] = Color(0.9, 0.5, 0.2)
+					icon["tooltip"] = "Extra attack available"
+				"cheatDeath":
+					icon["symbol"] = "U"
+					icon["color"] = Color(0.9, 0.8, 0.3)
+					icon["tooltip"] = "Cannot go below 1 HP"
+				"leech":
+					icon["symbol"] = "L"
+					icon["color"] = Color(0.3, 0.8, 0.3)
+					icon["tooltip"] = "Heals when dealing damage"
+				"negateSpell":
+					icon["symbol"] = "N"
+					icon["color"] = Color(0.4, 0.6, 0.9)
+					icon["tooltip"] = "Negate next spell"
+				"stealthed":
+					icon["symbol"] = "E"
+					icon["color"] = Color(0.4, 0.4, 0.5)
+					icon["tooltip"] = "Stealthed - Ignores non-AOE damage"
+				"vortexShield":
+					icon["symbol"] = "V"
+					icon["color"] = Color(0.3, 0.7, 0.9)
+					icon["tooltip"] = "Vortex Shield - Fully immune"
+				_:
+					icon["symbol"] = "B"
+					icon["color"] = Color(0.3, 0.7, 0.3)
+					icon["tooltip"] = buff_name
+			icons.append(icon)
+
+		return icons
+
+
+	func _get_tooltip_text() -> String:
+		"""Get tooltip text for status icons under mouse cursor."""
+		var icons := _get_status_icons()
+		if icons.is_empty():
+			return ""
+
+		var mouse_pos := get_local_mouse_position()
+		var icon_y := 0.0
+
+		# Calculate y position where status icons are drawn
+		# This is approximate - after stats (portrait + name + hp + stats)
+		icon_y = 75.0 + 14 + 30 + float(VisualTheme.HP_BAR_HEIGHT_ENHANCED) + 4 + 22
+
+		var icon_x := 10.0
+		for icon_data: Dictionary in icons:
+			var icon_center := Vector2(icon_x + 8, icon_y + 8)
+			if mouse_pos.distance_to(icon_center) < 11.0:
+				return icon_data.get("tooltip", "")
+			icon_x += 22.0
+
+		return ""
+
+
 class FloatingCombatText extends Control:
 	var _text: String = ""
 	var _color: Color = Color.WHITE
@@ -1346,24 +1713,33 @@ class FloatingCombatText extends Control:
 	var _elapsed: float = 0.0
 	var _font_size: int = 18
 	var _is_damage: bool = true
+	var _is_critical: bool = false
 	var _start_scale: float = 1.0
 
 	func _init() -> void:
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
-		custom_minimum_size = Vector2(100, 50)
+		custom_minimum_size = Vector2(120, 60)
 
-	func setup(text: String, screen_pos: Vector2, color: Color = Color.WHITE, is_damage: bool = true) -> void:
+	func setup(text: String, screen_pos: Vector2, color: Color = Color.WHITE, is_damage: bool = true, is_critical: bool = false) -> void:
 		_text = text
 		_color = color
 		_is_damage = is_damage
-		_font_size = 22 if is_damage else 18
-		_start_scale = 1.4 if is_damage else 1.0
-		position = screen_pos - Vector2(50, 25)
+		_is_critical = is_critical
+		if is_critical:
+			_font_size = VisualTheme.COMBAT_FONT_CRIT
+			_start_scale = VisualTheme.COMBAT_IMPACT_SCALE
+		elif is_damage:
+			_font_size = VisualTheme.COMBAT_FONT_DAMAGE
+			_start_scale = 1.5
+		else:
+			_font_size = VisualTheme.COMBAT_FONT_HEAL
+			_start_scale = 1.0
+		position = screen_pos - Vector2(60, 30)
 
 		# Impact pop animation for damage
 		if is_damage:
 			scale = Vector2(_start_scale, _start_scale)
-			pivot_offset = Vector2(50, 25)
+			pivot_offset = Vector2(60, 30)
 			var tween := create_tween()
 			tween.tween_property(self, "scale", Vector2.ONE, 0.2).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
 
@@ -1397,9 +1773,182 @@ class FloatingCombatText extends Control:
 		draw_color.a = alpha
 		var outline := Color.BLACK
 		outline.a = alpha * 0.9
-		var pos := Vector2(50, 25 + y_offset)
+		var pos := Vector2(60, 30 + y_offset)
 
 		# Thicker outline for more impact
 		for off in [Vector2(-1.5, -1.5), Vector2(1.5, -1.5), Vector2(-1.5, 1.5), Vector2(1.5, 1.5), Vector2(0, -2), Vector2(0, 2), Vector2(-2, 0), Vector2(2, 0)]:
-			draw_string(ThemeDB.fallback_font, pos + off, _text, HORIZONTAL_ALIGNMENT_CENTER, 100, _font_size, outline)
-		draw_string(ThemeDB.fallback_font, pos, _text, HORIZONTAL_ALIGNMENT_CENTER, 100, _font_size, draw_color)
+			draw_string(ThemeDB.fallback_font, pos + off, _text, HORIZONTAL_ALIGNMENT_CENTER, 120, _font_size, outline)
+		draw_string(ThemeDB.fallback_font, pos, _text, HORIZONTAL_ALIGNMENT_CENTER, 120, _font_size, draw_color)
+
+
+## === FLOATING TAUNT TEXT ===
+## Snarky champion-specific taunts that float up from attacks
+
+class FloatingTauntText extends Control:
+	var _text: String = ""
+	var _champion_name: String = ""
+	var _lifetime: float = 2.5
+	var _elapsed: float = 0.0
+	var _color: Color = Color(1.0, 0.85, 0.3)  # Golden for taunts
+
+	func _init() -> void:
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		custom_minimum_size = Vector2(400, 60)
+
+	func setup(text: String, screen_pos: Vector2, champion_name: String) -> void:
+		_text = text
+		_champion_name = champion_name
+		# Champion-specific taunt colors
+		_color = _get_champion_taunt_color(champion_name)
+		position = screen_pos - Vector2(200, 30)
+		# Pop-in scale animation
+		scale = Vector2(0.3, 0.3)
+		pivot_offset = Vector2(200, 30)
+		var tween := create_tween()
+		tween.tween_property(self, "scale", Vector2(1.0, 1.0), 0.3).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+
+	func _get_champion_taunt_color(champ_name: String) -> Color:
+		match champ_name:
+			"Brute": return Color(0.9, 0.5, 0.2)       # Orange
+			"Ranger": return Color(0.3, 0.8, 0.3)       # Green
+			"Beast": return Color(0.7, 0.4, 0.2)        # Brown
+			"Redeemer": return Color(1.0, 0.95, 0.5)     # Holy gold
+			"Confessor": return Color(0.6, 0.3, 0.6)     # Purple
+			"Barbarian": return Color(0.9, 0.3, 0.2)     # Red
+			"Burglar": return Color(0.5, 0.5, 0.6)       # Steel gray
+			"Berserker": return Color(1.0, 0.2, 0.2)     # Bright red
+			"Shaman": return Color(0.3, 0.7, 0.9)        # Spirit blue
+			"Illusionist": return Color(0.7, 0.4, 0.9)   # Arcane purple
+			"DarkWizard": return Color(0.4, 0.1, 0.5)    # Dark purple
+			"Alchemist": return Color(0.2, 0.9, 0.5)     # Chemical green
+			_: return Color(1.0, 0.85, 0.3)
+
+	func _process(delta: float) -> void:
+		_elapsed += delta
+		if _elapsed >= _lifetime:
+			queue_free()
+			return
+		queue_redraw()
+
+	func _draw() -> void:
+		var progress := _elapsed / _lifetime
+		# Gentle float up with slight wave
+		var y_offset := -40.0 * progress
+		var x_wave := sin(progress * PI * 2.0) * 5.0
+
+		# Fade: hold for 60%, then fade
+		var alpha: float
+		if progress < 0.6:
+			alpha = 1.0
+		else:
+			alpha = 1.0 - ((progress - 0.6) / 0.4)
+
+		var draw_color := _color
+		draw_color.a = alpha
+		var outline := Color.BLACK
+		outline.a = alpha * 0.95
+		var pos := Vector2(200 + x_wave, 30 + y_offset)
+		var font_size := 20
+
+		# Draw speech bubble background
+		var bubble_rect := Rect2(pos.x - 160, pos.y - 18, 320, 32)
+		var bg_color := Color(0, 0, 0, alpha * 0.5)
+		draw_rect(bubble_rect, bg_color, true)
+		var border_color := _color
+		border_color.a = alpha * 0.6
+		draw_rect(bubble_rect, border_color, false, 1.5)
+
+		# Draw text with outline
+		for off in [Vector2(-1.5, -1.5), Vector2(1.5, -1.5), Vector2(-1.5, 1.5), Vector2(1.5, 1.5)]:
+			draw_string(ThemeDB.fallback_font, pos + off, _text, HORIZONTAL_ALIGNMENT_CENTER, 320, font_size, outline)
+		draw_string(ThemeDB.fallback_font, pos, _text, HORIZONTAL_ALIGNMENT_CENTER, 320, font_size, draw_color)
+
+
+## === CARD SHOWCASE ===
+## Shows a card at center screen for 2 seconds when cast (especially by AI)
+
+class CardShowcase extends Control:
+	var _card_name: String = ""
+	var _caster_name: String = ""
+	var _card_visual: CardVisual
+	var _elapsed: float = 0.0
+	var _lifetime: float = 2.0
+	var _bg: ColorRect
+
+	const CARD_SCENE_PATH := "res://scenes/game/cards/card_visual.tscn"
+
+	func _init() -> void:
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	func setup(card_name: String, caster_name: String) -> void:
+		_card_name = card_name
+		_caster_name = caster_name
+
+		# Dark overlay behind the card
+		_bg = ColorRect.new()
+		_bg.color = Color(0, 0, 0, 0.0)
+		_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+		_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(_bg)
+
+		# Create card visual
+		var scene := load(CARD_SCENE_PATH)
+		_card_visual = scene.instantiate()
+		_card_visual.setup(card_name, true, false)
+		_card_visual.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		# Recursively set mouse filter on children
+		_set_mouse_filter_recursive(_card_visual, Control.MOUSE_FILTER_IGNORE)
+
+		# Position at center, scaled up
+		var screen_size := Vector2(1920, 1080)
+		if get_viewport():
+			screen_size = get_viewport().get_visible_rect().size
+		var card_size := Vector2(VisualTheme.CARD_WIDTH, VisualTheme.CARD_HEIGHT)
+		_card_visual.position = Vector2(
+			(screen_size.x - card_size.x * 1.5) / 2,
+			(screen_size.y - card_size.y * 1.5) / 2 - 40
+		)
+		_card_visual.scale = Vector2(1.5, 1.5)
+		_card_visual.pivot_offset = card_size / 2
+		add_child(_card_visual)
+
+		# Caster name label below card
+		var label := Label.new()
+		label.text = "%s casts %s" % [caster_name, card_name]
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.set_anchors_preset(Control.PRESET_CENTER)
+		label.offset_left = -200
+		label.offset_right = 200
+		label.offset_top = card_size.y * 1.5 / 2 + 10
+		label.offset_bottom = card_size.y * 1.5 / 2 + 40
+		label.add_theme_font_size_override("font_size", 18)
+		label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.6))
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(label)
+
+		# Animate in: scale pop + background fade
+		_card_visual.modulate.a = 0.0
+		var tween := create_tween()
+		tween.set_parallel(true)
+		tween.tween_property(_bg, "color:a", 0.35, 0.3)
+		tween.tween_property(_card_visual, "modulate:a", 1.0, 0.3)
+		tween.tween_property(_card_visual, "scale", Vector2(1.5, 1.5), 0.4).from(Vector2(0.5, 0.5)).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+
+	func _set_mouse_filter_recursive(node: Node, filter: Control.MouseFilter) -> void:
+		if node is Control:
+			(node as Control).mouse_filter = filter
+		for child in node.get_children():
+			_set_mouse_filter_recursive(child, filter)
+
+	func _process(delta: float) -> void:
+		_elapsed += delta
+		if _elapsed >= _lifetime:
+			# Fade out and cleanup
+			var tween := create_tween()
+			tween.set_parallel(true)
+			tween.tween_property(_bg, "color:a", 0.0, 0.3)
+			if _card_visual:
+				tween.tween_property(_card_visual, "modulate:a", 0.0, 0.3)
+				tween.tween_property(_card_visual, "scale", Vector2(0.8, 0.8), 0.3)
+			tween.chain().tween_callback(queue_free)
+			set_process(false)

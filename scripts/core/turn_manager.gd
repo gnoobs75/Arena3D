@@ -76,8 +76,9 @@ func _execute_start_phase() -> void:
 	for champion: ChampionState in game_state.get_champions(player_id):
 		champion.reset_turn()
 
-	# Draw 1 card
-	var _drawn := game_state.draw_card(player_id)
+	# Clear draw tracking from previous turn and draw 1 card
+	game_state.clear_drawn_this_turn()
+	var _drawn := game_state.draw_card(player_id, true)  # true = drawn at turn start
 	# NOTE: onDraw response triggers would be handled by GameController if needed
 	# The ResponseStack system handles response windows, not TurnManager
 

@@ -374,9 +374,15 @@ func _make_matchup_key(team1: Array[String], team2: Array[String]) -> String:
 
 func _extract_champion_name(champion_id: String) -> String:
 	"""Extract champion name from unique ID (e.g., 'brute_p1_0' -> 'Brute')."""
+	# Use CardDatabase lookup for correct casing (handles "darkwizard" -> "DarkWizard")
 	var parts := champion_id.split("_")
 	if parts.size() > 0:
-		return parts[0].capitalize()
+		var raw_name := parts[0]
+		var champion_names := CardDatabase.get_all_champion_names()
+		for name: String in champion_names:
+			if name.to_lower() == raw_name:
+				return name
+		return raw_name.capitalize()
 	return ""
 
 

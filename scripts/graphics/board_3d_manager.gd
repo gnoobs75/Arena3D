@@ -190,7 +190,7 @@ func _on_champion_debuff_applied(champion_id: String, debuff_name: String, durat
 		_play_debuff_effect(champion)
 
 
-func _on_card_played(player_id: int, card_id: String, targets: Array) -> void:
+func _on_card_played(player_id: int, card_id: String, targets: Array, _caster_id: String = "") -> void:
 	"""Handle card cast - play cast animation."""
 	if not board_3d or not game_state:
 		return

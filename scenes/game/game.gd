@@ -23,6 +23,8 @@ var response_slot: ResponseSlot  # Player's response card slot
 # Game systems
 var game_controller: GameController
 var ai_controller: AIController
+var network_proxy: RefCounted = null  # NetworkGameProxy, loaded dynamically
+var is_network_game: bool = false
 
 # Input state
 enum InputMode {
@@ -38,7 +40,8 @@ enum InputMode {
 	IMMEDIATE_CONTROL_ATTACK,  # Player attacking with a mind-controlled enemy champion
 	SELECT_DISCARD,  # Player selecting cards to discard (e.g., From the Sky)
 	INTEL_CHOICE,  # Player choosing top/bottom for Intel card
-	X_VALUE_CHOICE  # Player choosing X mana value (e.g., Guess Again)
+	X_VALUE_CHOICE,  # Player choosing X mana value (e.g., Guess Again)
+	SELECT_PLACEMENT  # Player selecting destination tile for Heave (anyEmpty)
 }
 
 var input_mode: InputMode = InputMode.SELECT_CHAMPION
@@ -56,10 +59,15 @@ var decision_log: DecisionLogPanel = null
 # Immediate movement state
 var _pending_immediate_moves: Array = []  # Champion IDs waiting for movement selection
 var _immediate_move_champion_id: String = ""  # Currently selecting move for this champion
+var _skip_move_button: Button = null  # "Skip" button during immediate movement
 
 # Mind control state (Betrayal)
 var _control_champion_id: String = ""  # Enemy champion being controlled
 var _control_player_id: int = 0  # Player who has control
+
+# Placement state (Heave anyEmpty)
+var _placement_champion_id: String = ""  # Champion being placed
+var _placement_valid_positions: Array = []  # Valid destination tiles
 
 
 # Helper to get the active board (works with both 2D and 3D)
@@ -108,6 +116,11 @@ func _ready() -> void:
 		print("GameScene: Developer Mode enabled - step-through debugging active")
 		dev_controller = DeveloperModeController.new()
 
+	# Check for network multiplayer mode
+	is_network_game = GameManager.is_network_game
+	if is_network_game:
+		print("GameScene: Network multiplayer mode enabled (player %d)" % NetworkManager.local_player_id)
+
 	_setup_scene()
 	_start_game()
 
@@ -119,38 +132,29 @@ func _unhandled_input(event: InputEvent) -> void:
 		_on_end_turn_pressed()
 
 
+var layout: LayoutManager = LayoutManager.new()
+
+
 func _setup_scene() -> void:
 	"""Create and position game elements."""
-	# Layout constants - must match game_hud.gd
-	const MARGIN := 10
-	const PANEL_WIDTH := 220
-	const TOP_BAR_HEIGHT := 160
-	const BOTTOM_BAR_HEIGHT := 200  # Hand UI height (increased for larger cards)
-	const BOARD_SIZE := 688  # 10*64 tiles + 24*2 coord margins
-	const SCREEN_WIDTH := 1920
-	const SCREEN_HEIGHT := 1080
+	var viewport_size := get_viewport_rect().size
+	layout.calculate(viewport_size)
 
-	# Calculate available vertical space for board - maximize it
-	var top_offset := TOP_BAR_HEIGHT + MARGIN
-	var available_height := SCREEN_HEIGHT - top_offset - BOTTOM_BAR_HEIGHT - MARGIN * 2
+	# Connect resize signal for responsive layout
+	get_tree().root.size_changed.connect(_on_viewport_resized)
 
-	# Scale board to fill available vertical space
-	var board_scale := available_height / float(BOARD_SIZE)
+	var board_x := layout.board_rect.position.x
+	var board_y := layout.board_rect.position.y
+	var board_scale := layout.board_scale
 
-	# Calculate centered board position horizontally
-	# Left panel ends at: MARGIN + PANEL_WIDTH = 230
-	# Right panel starts at: 1920 - MARGIN - PANEL_WIDTH = 1690
-	# Center area: 1460px wide
-	var center_area_start := MARGIN + PANEL_WIDTH
-	var center_area_width := SCREEN_WIDTH - 2 * (MARGIN + PANEL_WIDTH)
-	var board_x := center_area_start + (center_area_width - BOARD_SIZE * board_scale) / 2
-
-	# Position board at top of available space to maximize vertical usage
-	var board_y := top_offset
+	# Size background to viewport
+	var bg := get_node_or_null("Background")
+	if bg is ColorRect:
+		bg.size = viewport_size
 
 	if use_3d_board:
 		# Create 3D board with SubViewport for rendering
-		_setup_3d_board(board_x, board_y, BOARD_SIZE * board_scale)
+		_setup_3d_board(board_x, board_y, layout.board_rect.size.x)
 	else:
 		# Use traditional 2D board
 		board = BOARD_SCENE.instantiate()
@@ -169,6 +173,7 @@ func _setup_scene() -> void:
 	# Create HUD (CanvasLayer for UI elements)
 	hud = HUD_SCENE.instantiate()
 	add_child(hud)
+	hud.update_layout(layout)
 
 	# Connect HUD signals
 	hud.end_turn_pressed.connect(_on_end_turn_pressed)
@@ -178,6 +183,7 @@ func _setup_scene() -> void:
 	# Create hand UI - add to HUD's CanvasLayer so anchors work correctly
 	hand_ui = HAND_SCENE.instantiate()
 	hud.add_child(hand_ui)  # Add to CanvasLayer, not Node2D
+	hand_ui.update_layout(layout)
 
 	# Connect hand signals
 	hand_ui.card_selected.connect(_on_card_selected)
@@ -186,20 +192,21 @@ func _setup_scene() -> void:
 
 	# Create response slot - positioned to the LEFT of the board, vertically centered
 	response_slot = ResponseSlot.new()
-	var slot_x := board_x - ResponseSlot.SLOT_WIDTH - 20  # Left of board with gap
-	var slot_y := top_offset + (available_height - ResponseSlot.SLOT_HEIGHT) / 2  # Vertically centered
-	response_slot.position = Vector2(slot_x, slot_y)
+	response_slot.position = layout.response_slot_rect.position
 	add_child(response_slot)
 
 	# Connect response slot signals
 	response_slot.slot_clicked.connect(_on_response_slot_clicked)
 	response_slot.card_removed.connect(_on_response_card_removed)
 
+	# === Dark background vignette ===
+	_create_vignette()
+
 	# === Developer Mode: draggable/resizable panels ===
 	if developer_mode:
 		# Decision log panel
 		decision_log = DecisionLogPanel.new()
-		var log_default_pos := Vector2(SCREEN_WIDTH - DecisionLogPanel.PANEL_WIDTH - MARGIN, TOP_BAR_HEIGHT + MARGIN)
+		var log_default_pos := Vector2(viewport_size.x - DecisionLogPanel.PANEL_WIDTH - LayoutManager.MARGIN, LayoutManager.MARGIN)
 		var log_default_size := Vector2(DecisionLogPanel.PANEL_WIDTH, DecisionLogPanel.PANEL_HEIGHT + DraggableWrapper.TITLE_BAR_HEIGHT)
 		var log_wrapper := DraggableWrapper.wrap(
 			decision_log, "decision_log", "Decision Log",
@@ -212,12 +219,12 @@ func _setup_scene() -> void:
 		decision_log.set_status("Developer Mode - Waiting for game start...")
 
 		# Wrap the board in a draggable overlay
-		var board_visual_size := BOARD_SIZE * board_scale
+		var board_visual_size := layout.board_rect.size.x
 		_setup_board_drag_overlay(board_x, board_y, board_visual_size, board_scale)
 
 		# Wrap hand UI (lives in HUD CanvasLayer)
-		var hand_default_pos := Vector2(240, SCREEN_HEIGHT - BOTTOM_BAR_HEIGHT - DraggableWrapper.TITLE_BAR_HEIGHT)
-		var hand_default_size := Vector2(SCREEN_WIDTH - 480, BOTTOM_BAR_HEIGHT + DraggableWrapper.TITLE_BAR_HEIGHT)
+		var hand_default_pos := Vector2(layout.hand_rect.position.x, layout.hand_rect.position.y - DraggableWrapper.TITLE_BAR_HEIGHT)
+		var hand_default_size := Vector2(layout.hand_rect.size.x, layout.hand_rect.size.y + DraggableWrapper.TITLE_BAR_HEIGHT)
 		# Remove from HUD, clear anchors, wrap, re-add
 		hud.remove_child(hand_ui)
 		hand_ui.anchor_left = 0
@@ -466,15 +473,31 @@ func _start_game() -> void:
 	game_controller.effect_processor.intel_choice_required.connect(_on_intel_choice_required)
 	game_controller.effect_processor.x_value_required.connect(_on_x_value_required)
 	game_controller.effect_processor.discard_choice_required.connect(_on_discard_choice_required)
+	game_controller.effect_processor.placement_selection_required.connect(_on_placement_selection_required)
 
-	# Initialize AI for player 2
-	ai_controller = AIController.new(game_controller, 2)
-	ai_controller.set_difficulty(AIController.Difficulty.MEDIUM)
+	# Connect EventBus for card showcase (shows card center screen when played)
+	if EventBus:
+		EventBus.card_played.connect(_on_card_played_showcase)
 
-	# Initialize AI for player 1 if AI vs AI mode
-	if ai_vs_ai_mode:
-		ai_player1 = AIController.new(game_controller, 1)
-		ai_player1.set_difficulty(AIController.Difficulty.MEDIUM)
+	# Initialize AI or network proxy depending on mode
+	if is_network_game:
+		# Network multiplayer - create proxy instead of AI for opponent
+		var proxy_script: GDScript = load("res://scripts/multiplayer/network_game_proxy.gd")
+		network_proxy = proxy_script.new()
+		network_proxy.initialize(game_controller)
+		network_proxy.remote_action_received.connect(_on_remote_action)
+		network_proxy.opponent_end_turn.connect(_on_remote_end_turn)
+		network_proxy.state_sync_applied.connect(_on_state_sync_applied)
+		network_proxy.opponent_disconnected.connect(_on_opponent_disconnected)
+	else:
+		# Single player - AI for player 2
+		ai_controller = AIController.new(game_controller, 2)
+		ai_controller.set_difficulty(AIController.Difficulty.MEDIUM)
+
+		# Initialize AI for player 1 if AI vs AI mode
+		if ai_vs_ai_mode:
+			ai_player1 = AIController.new(game_controller, 1)
+			ai_player1.set_difficulty(AIController.Difficulty.MEDIUM)
 
 	# Initialize UI with game state
 	var state := game_controller.get_game_state()
@@ -489,8 +512,10 @@ func _start_game() -> void:
 		board.play_board_reveal()
 
 	hud.initialize(state)
-	hand_ui.setup(1)
-	response_slot.setup(1, state)
+	var local_pid := NetworkManager.local_player_id if is_network_game else 1
+	hand_ui.set_game_state(state)
+	hand_ui.setup(local_pid)
+	response_slot.setup(local_pid, state)
 
 	# Fade in from screen transition
 	if UIAnimator:
@@ -521,7 +546,14 @@ func _initialize_3d_board(state: GameState) -> void:
 
 func _on_turn_started(player_id: int, round_number: int) -> void:
 	"""Handle turn start."""
-	is_player_turn = player_id == 1 and not ai_vs_ai_mode
+	if is_network_game:
+		# Network: local player's turn if player_id matches local_player_id
+		is_player_turn = network_proxy.is_local_player_turn()
+	else:
+		is_player_turn = player_id == 1 and not ai_vs_ai_mode
+
+	# Reset per-turn scoreboard tracking
+	hud.reset_turn_damage(player_id)
 
 	_update_ui()
 	_reset_input_state()
@@ -529,7 +561,17 @@ func _on_turn_started(player_id: int, round_number: int) -> void:
 	# Show dramatic turn banner
 	hud.show_turn_banner(player_id)
 
-	if developer_mode:
+	if is_network_game:
+		if is_player_turn:
+			hud.show_message("Your turn!")
+			hud.set_action_buttons_enabled(true)
+			# Host sends state sync at start of each turn
+			if network_proxy.is_host:
+				network_proxy.broadcast_state_sync()
+		else:
+			hud.show_message("Opponent's turn...")
+			hud.set_action_buttons_enabled(false)
+	elif developer_mode:
 		# Developer mode: step-through AI debugging
 		await _handle_developer_mode_turn(player_id)
 	elif ai_vs_ai_mode:
@@ -552,7 +594,17 @@ func _on_turn_started(player_id: int, round_number: int) -> void:
 
 
 func _on_turn_ended(player_id: int) -> void:
-	"""Handle turn end."""
+	"""Handle turn end with damage summary."""
+	var turn_dmg := hud.get_turn_damage(player_id)
+	if turn_dmg >= 5:
+		# Show impressive turn damage in combat text
+		var player_name: String
+		if is_network_game:
+			player_name = "You" if player_id == NetworkManager.local_player_id else "Opponent"
+		else:
+			player_name = "Player %d" % player_id
+		hud.show_combat_text("%s dealt %d damage this turn!" % [player_name, turn_dmg],
+			Vector2(960, 480), Color(1.0, 0.8, 0.3), false, turn_dmg >= 8)
 	_update_ui()
 
 
@@ -609,9 +661,10 @@ func _on_champion_died(champion_id: String) -> void:
 
 
 func _on_damage_dealt(attacker_id: String, target_id: String, amount: int) -> void:
-	"""Show floating damage number when damage is dealt."""
+	"""Show floating damage number, taunts, and crowd reactions when damage is dealt."""
 	var state := game_controller.get_game_state()
 	var target := state.get_champion(target_id)
+	var attacker := state.get_champion(attacker_id)
 	if target and amount > 0:
 		var active_board = get_active_board()
 		if active_board:
@@ -623,6 +676,17 @@ func _on_damage_dealt(attacker_id: String, target_id: String, amount: int) -> vo
 		# Screen shake for heavy hits (3+ damage)
 		if amount >= 3 and UIAnimator:
 			UIAnimator.screen_shake(clampf(amount * 1.5, 3.0, 8.0), 0.2)
+
+		# Track scoreboard damage
+		var attacker_name: String = attacker.champion_name if attacker else "Unknown"
+		var target_name: String = target.champion_name if target else "Unknown"
+		hud.track_damage(attacker_id, target_id, amount, attacker_name, target_name)
+
+		# Champion taunts on big hits (4+ damage) or kills
+		var is_kill: bool = target.current_hp <= 0
+		if amount >= 4 or is_kill:
+			if attacker:
+				hud.show_taunt(attacker_name, target_name, amount, is_kill)
 
 
 func _on_healing_done(source_id: String, target_id: String, amount: int) -> void:
@@ -639,9 +703,25 @@ func _on_healing_done(source_id: String, target_id: String, amount: int) -> void
 		hud.pulse_portrait_heal(target_id)
 
 
+func _on_card_played_showcase(player_id: int, card_name: String, _targets: Array, caster_id: String) -> void:
+	"""Show card showcase when any card is cast (especially for AI/opponent cards the player can't see)."""
+	# Only show showcase for non-local player's cards (AI or network opponent)
+	var local_pid := NetworkManager.local_player_id if is_network_game else 1
+	if player_id != local_pid or ai_vs_ai_mode:
+		var state := game_controller.get_game_state()
+		var caster := state.get_champion(caster_id) if not caster_id.is_empty() else null
+		var caster_name: String = caster.champion_name if caster else "Player %d" % player_id
+		hud.show_card_showcase(card_name, caster_name)
+
+
 func _on_game_ended(winner: int, reason: String) -> void:
 	"""Handle game over with dramatic effect."""
-	var winner_name := "Player 1" if winner == 1 else "AI"
+	var winner_name: String
+	if is_network_game:
+		var local_pid := NetworkManager.local_player_id
+		winner_name = "YOU" if winner == local_pid else "OPPONENT"
+	else:
+		winner_name = "Player 1" if winner == 1 else "AI"
 	hud.set_action_buttons_enabled(false)
 
 	# Dramatic game over banner
@@ -692,11 +772,19 @@ func _on_game_ended(winner: int, reason: String) -> void:
 func _on_response_window_opened(trigger: String, context: Dictionary) -> void:
 	"""Handle response window."""
 	var priority_player := game_controller.response_stack.get_priority_player()
+	var local_pid := NetworkManager.local_player_id if is_network_game else 1
 
-	if priority_player == 1:
-		# Human player gets to respond
+	# Pulse response slot
+	if response_slot:
+		response_slot.set_response_window_active(true)
+
+	if priority_player == local_pid:
+		# Local player gets to respond
 		hud.show_response_window(trigger, priority_player)
 		hud.show_message("You may respond or pass", 3.0)
+	elif is_network_game:
+		# Remote player gets to respond - wait for their action
+		hud.show_message("Waiting for opponent to respond...", 5.0)
 	else:
 		# AI gets to respond - handle automatically
 		_handle_ai_response()
@@ -705,22 +793,34 @@ func _on_response_window_opened(trigger: String, context: Dictionary) -> void:
 func _on_response_window_closed() -> void:
 	"""Handle response window closing."""
 	hud.hide_response_window()
+	# Stop response slot pulse
+	if response_slot:
+		response_slot.set_response_window_active(false)
 
 
 func _on_response_slot_triggered(player_id: int, card_name: String, trigger: String) -> void:
 	"""Handle response card auto-triggered from slot."""
-	var player_name := "Your" if player_id == 1 else "Enemy's"
+	var local_pid := NetworkManager.local_player_id if is_network_game else 1
+	var player_name := "Your" if player_id == local_pid else "Enemy's"
 	hud.show_message("%s %s triggered! (%s)" % [player_name, card_name, trigger], 2.5)
 
+	# Smoke Bomb VFX: smoke poof on all friendly champions
+	if card_name == "Smoke Bomb":
+		var state := game_controller.get_game_state()
+		var active_board = get_active_board()
+		if active_board:
+			for champ: ChampionState in state.get_living_champions(player_id):
+				active_board.trigger_smoke_poof(champ.position)
+
 	# Update the response slot UI (card is now gone)
-	if response_slot and player_id == 1:
+	if response_slot and player_id == local_pid:
 		response_slot.update_slot()
 
 	# Update displays
-	var active_board = get_active_board()
-	if active_board:
-		active_board.update_champion_hp()
-		active_board.update_champion_positions()
+	var active_board2 = get_active_board()
+	if active_board2:
+		active_board2.update_champion_hp()
+		active_board2.update_champion_positions()
 	_update_ui()
 
 
@@ -745,9 +845,10 @@ func _on_champion_clicked(champion_id: String) -> void:
 	if champion == null:
 		return
 
+	var local_pid := NetworkManager.local_player_id if is_network_game else 1
 	match input_mode:
 		InputMode.SELECT_CHAMPION, InputMode.NONE:
-			if champion.owner_id == 1:
+			if champion.owner_id == local_pid:
 				# Select own champion
 				_select_champion(champion_id)
 			else:
@@ -759,7 +860,7 @@ func _on_champion_clicked(champion_id: String) -> void:
 			# In move mode, clicking champions allows:
 			# - Clicking own champion: switch selection
 			# - Clicking enemy: attack if in range
-			if champion.owner_id == 1:
+			if champion.owner_id == local_pid:
 				# Switch to different champion
 				_select_champion(champion_id)
 			else:
@@ -768,7 +869,7 @@ func _on_champion_clicked(champion_id: String) -> void:
 					_try_attack(champion_id)
 
 		InputMode.SELECT_ATTACK_TARGET:
-			if champion.owner_id != 1:
+			if champion.owner_id != local_pid:
 				_try_attack(champion_id)
 
 		InputMode.SELECT_CAST_TARGET:
@@ -784,6 +885,10 @@ func _on_tile_clicked(position: Vector2i) -> void:
 
 	if input_mode == InputMode.IMMEDIATE_CONTROL_MOVE:
 		_try_control_move(position)
+		return
+
+	if input_mode == InputMode.SELECT_PLACEMENT:
+		_try_placement(position)
 		return
 
 	if not is_player_turn:
@@ -904,15 +1009,16 @@ func _handle_response_card_selection(card_name: String, card_data: Dictionary) -
 
 func _play_response_card(card_name: String, targets: Array) -> void:
 	"""Play a response card."""
-	# Find a valid caster (any living champion of player 1)
+	# Find a valid caster (any living champion of local player)
 	var state := game_controller.get_game_state()
+	var local_pid := NetworkManager.local_player_id if is_network_game else 1
 	var caster_id := ""
 
 	# For character-specific responses, use the specific character
 	var card_data := CardDatabase.get_card(card_name)
 	var card_character: String = card_data.get("character", "")
 
-	for champ: ChampionState in state.get_champions(1):
+	for champ: ChampionState in state.get_champions(local_pid):
 		if champ.is_alive():
 			if card_character.is_empty() or champ.champion_name == card_character:
 				caster_id = champ.unique_id
@@ -923,7 +1029,7 @@ func _play_response_card(card_name: String, targets: Array) -> void:
 		return
 
 	print("Game: Playing response '%s' with caster '%s' and targets %s" % [card_name, caster_id, targets])
-	var result := game_controller.play_response(1, card_name, caster_id, targets)
+	var result := game_controller.play_response(local_pid, card_name, caster_id, targets)
 
 	if result.get("success", false):
 		hud.show_message("Response played: " + card_name)
@@ -944,6 +1050,16 @@ func _on_card_deselected() -> void:
 
 func _select_champion(champion_id: String) -> void:
 	"""Select a champion and show available actions."""
+	var state := game_controller.get_game_state()
+	var champion := state.get_champion(champion_id)
+
+	# Check for hypnotized champion - offer to pay 2 mana to break free
+	if champion and champion.has_debuff("hypnotized") and is_player_turn:
+		var local_pid := NetworkManager.local_player_id if is_network_game else 1
+		if champion.owner_id == local_pid:
+			_try_break_hypnotize(champion_id)
+			return
+
 	selected_champion_id = champion_id
 	var active_board = get_active_board()
 	if active_board:
@@ -951,9 +1067,6 @@ func _select_champion(champion_id: String) -> void:
 
 	# Highlight the portrait in the HUD
 	hud.set_selected_champion(champion_id)
-
-	var state := game_controller.get_game_state()
-	var champion := state.get_champion(champion_id)
 
 	if champion == null:
 		return
@@ -1022,9 +1135,22 @@ func _try_move(position: Vector2i) -> void:
 	if selected_champion_id.is_empty():
 		return
 
+	if is_network_game and not network_proxy.is_host:
+		# Guest: send request to host
+		network_proxy.send_move_request(selected_champion_id, position)
+		_reset_input_state()
+		return
+
 	var result := game_controller.move_champion(selected_champion_id, position)
 	if result.get("success", false):
 		_update_after_action()
+		if is_network_game and network_proxy.is_host:
+			network_proxy.broadcast_action("move", {
+				"champion_id": selected_champion_id,
+				"target_x": position.x,
+				"target_y": position.y
+			}, result)
+			network_proxy.broadcast_state_sync()
 
 
 func _try_attack(target_id: String) -> void:
@@ -1032,9 +1158,21 @@ func _try_attack(target_id: String) -> void:
 	if selected_champion_id.is_empty():
 		return
 
+	if is_network_game and not network_proxy.is_host:
+		# Guest: send request to host
+		network_proxy.send_attack_request(selected_champion_id, target_id)
+		_reset_input_state()
+		return
+
 	var result := game_controller.attack_champion(selected_champion_id, target_id)
 	if result.get("success", false):
 		_update_after_action()
+		if is_network_game and network_proxy.is_host:
+			network_proxy.broadcast_action("attack", {
+				"attacker_id": selected_champion_id,
+				"target_id": target_id
+			}, result)
+			network_proxy.broadcast_state_sync()
 
 
 func _try_cast_on_target(target_id: String) -> void:
@@ -1044,9 +1182,10 @@ func _try_cast_on_target(target_id: String) -> void:
 
 	# Auto-select caster if none selected
 	var caster_id := selected_champion_id
+	var local_pid := NetworkManager.local_player_id if is_network_game else 1
 	if caster_id.is_empty():
 		var state := game_controller.get_game_state()
-		for champ: ChampionState in state.get_living_champions(1):
+		for champ: ChampionState in state.get_living_champions(local_pid):
 			caster_id = champ.unique_id
 			break
 
@@ -1054,15 +1193,29 @@ func _try_cast_on_target(target_id: String) -> void:
 		print("No valid caster found")
 		return
 
+	if is_network_game and not network_proxy.is_host:
+		# Guest: send request to host
+		network_proxy.send_cast_request(selected_card, caster_id, [target_id])
+		hand_ui.clear_selection()
+		_reset_input_state()
+		return
+
 	print("Casting %s with %s on %s" % [selected_card, caster_id, target_id])
 	var result := game_controller.cast_card(selected_card, caster_id, [target_id])
 	print("Cast result: %s" % result)
 
 	if result.get("success", false):
-		hand_ui.play_card_fly_animation(selected_card)
+		_play_card_cast_vfx(selected_card)
 		hand_ui.clear_selection()
 		_update_after_action()
 		_reset_input_state()
+		if is_network_game and network_proxy.is_host:
+			network_proxy.broadcast_action("cast", {
+				"card_name": selected_card,
+				"caster_id": caster_id,
+				"targets": [target_id]
+			}, result)
+			network_proxy.broadcast_state_sync()
 	else:
 		# Show error message
 		var error: String = result.get("error", "Cast failed")
@@ -1078,11 +1231,12 @@ func _try_cast_no_target() -> void:
 
 	# Use selected champion or first living champion as caster
 	var state := game_controller.get_game_state()
+	var local_pid := NetworkManager.local_player_id if is_network_game else 1
 	var caster_id := selected_champion_id
 	print("  selected_champion_id='%s'" % selected_champion_id)
 	if caster_id.is_empty():
 		print("  No champion selected, finding first living champion...")
-		for champ: ChampionState in state.get_living_champions(1):
+		for champ: ChampionState in state.get_living_champions(local_pid):
 			caster_id = champ.unique_id
 			print("  Found: %s" % caster_id)
 			break
@@ -1098,20 +1252,93 @@ func _try_cast_no_target() -> void:
 	if target_type.to_lower() == "self":
 		targets = [caster_id]  # Self-targeting cards apply to caster
 
+	if is_network_game and not network_proxy.is_host:
+		# Guest: send request to host
+		network_proxy.send_cast_request(selected_card, caster_id, targets)
+		hand_ui.clear_selection()
+		_reset_input_state()
+		return
+
 	print("Casting %s with caster %s, targets %s" % [selected_card, caster_id, targets])
 	var result := game_controller.cast_card(selected_card, caster_id, targets)
 	print("Cast result: %s" % result)
 
 	if result.get("success", false):
 		print("  Cast successful! Updating UI...")
-		hand_ui.play_card_fly_animation(selected_card)
+		_play_card_cast_vfx(selected_card)
 		hand_ui.clear_selection()
 		_update_after_action()
 		_reset_input_state()
+		if is_network_game and network_proxy.is_host:
+			network_proxy.broadcast_action("cast", {
+				"card_name": selected_card,
+				"caster_id": caster_id,
+				"targets": targets
+			}, result)
+			network_proxy.broadcast_state_sync()
 	else:
 		var error: String = result.get("error", "Cast failed")
 		print("  Cast failed: %s" % error)
 		hud.show_message(error, 1.5)
+
+
+func _on_viewport_resized() -> void:
+	"""Recalculate layout when viewport size changes."""
+	var viewport_size := get_viewport_rect().size
+	layout.calculate(viewport_size)
+
+	# Update board position/scale
+	if board:
+		board.position = layout.board_rect.position
+		board.scale = Vector2(layout.board_scale, layout.board_scale)
+	if board_3d_viewport:
+		board_3d_viewport.position = layout.board_rect.position
+		board_3d_viewport.size = layout.board_rect.size
+
+	# Update response slot
+	if response_slot and is_instance_valid(response_slot):
+		response_slot.position = layout.response_slot_rect.position
+
+	# Update HUD layout
+	if hud:
+		hud.update_layout(layout)
+
+	# Update hand layout
+	if hand_ui:
+		hand_ui.update_layout(layout)
+
+	# Update background
+	var bg := get_node_or_null("Background")
+	if bg is ColorRect:
+		bg.size = viewport_size
+
+
+func _create_vignette() -> void:
+	"""Create dark edge vignette overlay for atmosphere."""
+	var vignette := VignetteOverlay.new()
+	vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vignette.z_index = 50
+	# Add to a CanvasLayer so it overlays everything except HUD
+	var canvas := CanvasLayer.new()
+	canvas.layer = 5  # Below HUD (which is at default CanvasLayer)
+	canvas.add_child(vignette)
+	add_child(canvas)
+
+
+func _play_card_cast_vfx(card_name: String) -> void:
+	"""Play card fly animation + type-specific screen flash and effects."""
+	hand_ui.play_card_fly_animation(card_name)
+	var card_data := CardDatabase.get_card(card_name)
+	var card_type: String = str(card_data.get("type", ""))
+	if UIAnimator:
+		match card_type:
+			"Action":
+				UIAnimator.screen_flash(VisualTheme.FLASH_ACTION, 0.25)
+				UIAnimator.screen_shake(3.0, 0.15)
+			"Response":
+				UIAnimator.screen_flash(VisualTheme.FLASH_RESPONSE, 0.2)
+			"Equipment":
+				UIAnimator.screen_flash(VisualTheme.FLASH_EQUIPMENT, 0.2)
 
 
 func _update_after_action() -> void:
@@ -1144,13 +1371,51 @@ func _reset_input_state() -> void:
 	hud.clear_selection()  # Clear portrait highlighting
 
 
+func _try_break_hypnotize(champion_id: String) -> void:
+	"""Attempt to pay 2 mana to break a champion free from Hypnotize."""
+	var state := game_controller.get_game_state()
+	var champion := state.get_champion(champion_id)
+	if champion == null:
+		return
+
+	var local_pid := champion.owner_id
+	var mana := state.get_mana(local_pid)
+
+	if mana < 2:
+		hud.show_message("%s is petrified! Need 2 mana to break free (%d available)" % [champion.champion_name, mana], 2.0)
+		return
+
+	# Pay 2 mana and remove debuffs
+	state.spend_mana(local_pid, 2)
+	champion.remove_debuff("hypnotized")
+	champion.remove_buff("immune")
+
+	print("Broke %s free from Hypnotize! (paid 2 mana)" % champion.champion_name)
+	hud.show_message("%s breaks free from the stone curse!" % champion.champion_name, 2.0)
+
+	# Update visuals
+	var active_board = get_active_board()
+	if active_board:
+		active_board.update_champion_hp()  # Also updates status effects
+	_update_ui()
+
+	# Now select the freed champion normally
+	_select_champion(champion_id)
+
+
 func _on_end_turn_pressed() -> void:
 	"""Handle end turn button."""
 	print("End Turn button pressed, is_player_turn=%s" % is_player_turn)
 	if is_player_turn:
 		_reset_input_state()
+		if is_network_game and not network_proxy.is_host:
+			# Guest: send end turn request to host
+			network_proxy.send_end_turn_request()
+			return
 		var result := game_controller.end_turn()
 		print("End turn result: %s" % result)
+		if is_network_game and network_proxy.is_host:
+			network_proxy.broadcast_action("end_turn", {}, result)
 	else:
 		print("Cannot end turn - not player's turn")
 
@@ -1171,8 +1436,9 @@ func _on_pass_priority_pressed() -> void:
 	print("Game: _on_pass_priority_pressed called")
 	if game_controller.response_stack.is_open():
 		var priority_player := game_controller.response_stack.get_priority_player()
+		var local_pid := NetworkManager.local_player_id if is_network_game else 1
 		print("  Response stack is open, priority_player=%d" % priority_player)
-		if priority_player == 1:
+		if priority_player == local_pid:
 			var should_resolve := game_controller.response_stack.pass_priority()
 			print("  Player passed, should_resolve=%s" % should_resolve)
 			if should_resolve:
@@ -1187,8 +1453,12 @@ func _on_pass_priority_pressed() -> void:
 					active_board.update_champion_hp()
 					active_board.update_terrain()  # Update for temporary pits
 			else:
-				# Priority passed to opponent - AI will respond
-				_handle_ai_response()
+				if is_network_game:
+					# Priority passed to remote opponent - wait for their response
+					hud.show_message("Waiting for opponent to respond...", 5.0)
+				else:
+					# Priority passed to opponent - AI will respond
+					_handle_ai_response()
 
 
 # === Developer Mode Step-Through ===
@@ -1409,24 +1679,25 @@ func _update_ui() -> void:
 	var state := game_controller.get_game_state()
 	hud.update_display()
 
-	# Update hand for player 1
-	var hand := state.get_hand(1)
-	var mana := state.get_mana(1)
+	# Update hand for local player
+	var local_pid := NetworkManager.local_player_id if is_network_game else 1
+	var hand := state.get_hand(local_pid)
+	var mana := state.get_mana(local_pid)
 
-	# Check if response window is open and get valid responses for player 1
+	# Check if response window is open and get valid responses for local player
 	var valid_responses: Array[String] = []
 	if game_controller.response_stack.is_open():
 		var priority_player := game_controller.response_stack.get_priority_player()
-		if priority_player == 1:
-			valid_responses = game_controller.response_stack.get_valid_responses(1)
+		if priority_player == local_pid:
+			valid_responses = game_controller.response_stack.get_valid_responses(local_pid)
 
 	# Compute cards restricted by champion state (e.g. already attacked/moved)
 	var restricted: Array[String] = _get_restricted_cards(state, hand)
 
 	hand_ui.update_hand(hand, mana, valid_responses, restricted)
 
-	# Update discard pile for player 1
-	var discard := state.get_discard(1)
+	# Update discard pile for local player
+	var discard := state.get_discard(local_pid)
 	hand_ui.update_discard(discard)
 
 	# Update response slot
@@ -1438,6 +1709,7 @@ func _get_restricted_cards(state: GameState, hand: Array) -> Array[String]:
 	"""Get cards that can't be played due to champion state restrictions.
 	E.g. cards with canAttack:false on self are restricted if the owning champion already attacked."""
 	var restricted: Array[String] = []
+	var local_pid := NetworkManager.local_player_id if is_network_game else 1
 	for card_name: String in hand:
 		var card_data := CardDatabase.get_card(card_name)
 		var card_type: String = str(card_data.get("type", ""))
@@ -1447,7 +1719,7 @@ func _get_restricted_cards(state: GameState, hand: Array) -> Array[String]:
 		if card_character.is_empty():
 			continue
 		# Find the owning champion for this card
-		for champ: ChampionState in state.get_living_champions(1):
+		for champ: ChampionState in state.get_living_champions(local_pid):
 			if champ.champion_name == card_character:
 				if _card_prevents_attack_on_self(card_data) and champ.has_attacked:
 					restricted.append(card_name)
@@ -1493,9 +1765,20 @@ func _get_enemy_positions() -> Array[Vector2i]:
 	if caster == null:
 		return positions
 
+	# Check if selected card has global range
+	var is_global := false
+	if not selected_card.is_empty():
+		var card_data := CardDatabase.get_card(selected_card)
+		is_global = str(card_data.get("range", "")).to_lower() == "global"
+
+	var local_pid := NetworkManager.local_player_id if is_network_game else 1
+	var enemy_pid := 2 if local_pid == 1 else 1
 	var range_calc := RangeCalculator.new()
-	for enemy: ChampionState in state.get_living_champions(2):
-		if _is_in_cast_range(caster, enemy, state, range_calc):
+	for enemy: ChampionState in state.get_living_champions(enemy_pid):
+		# Stealthed enemies cannot be targeted
+		if enemy.has_buff("stealth"):
+			continue
+		if is_global or _is_in_cast_range(caster, enemy, state, range_calc):
 			positions.append(enemy.position)
 	return positions
 
@@ -1508,9 +1791,16 @@ func _get_ally_positions() -> Array[Vector2i]:
 	if caster == null:
 		return positions
 
+	# Check if selected card has global range
+	var is_global := false
+	if not selected_card.is_empty():
+		var card_data := CardDatabase.get_card(selected_card)
+		is_global = str(card_data.get("range", "")).to_lower() == "global"
+
+	var local_pid := NetworkManager.local_player_id if is_network_game else 1
 	var range_calc := RangeCalculator.new()
-	for ally: ChampionState in state.get_living_champions(1):
-		if _is_in_cast_range(caster, ally, state, range_calc):
+	for ally: ChampionState in state.get_living_champions(local_pid):
+		if is_global or _is_in_cast_range(caster, ally, state, range_calc):
 			positions.append(ally.position)
 	return positions
 
@@ -1520,9 +1810,10 @@ func _get_caster() -> ChampionState:
 	var state := game_controller.get_game_state()
 
 	# Use selected champion or first living champion
+	var local_pid := NetworkManager.local_player_id if is_network_game else 1
 	var caster_id := selected_champion_id
 	if caster_id.is_empty():
-		for champ: ChampionState in state.get_living_champions(1):
+		for champ: ChampionState in state.get_living_champions(local_pid):
 			return champ
 		return null
 
@@ -1600,9 +1891,10 @@ func _get_caster_position() -> Vector2i:
 	var state := game_controller.get_game_state()
 
 	# Use selected champion or first living champion
+	var local_pid := NetworkManager.local_player_id if is_network_game else 1
 	var caster_id := selected_champion_id
 	if caster_id.is_empty():
-		for champ: ChampionState in state.get_living_champions(1):
+		for champ: ChampionState in state.get_living_champions(local_pid):
 			caster_id = champ.unique_id
 			break
 
@@ -1638,23 +1930,37 @@ func _try_cast_direction(clicked_pos: Vector2i) -> void:
 
 	# Get caster
 	var state := game_controller.get_game_state()
+	var local_pid := NetworkManager.local_player_id if is_network_game else 1
 	var caster_id := selected_champion_id
 	if caster_id.is_empty():
-		for champ: ChampionState in state.get_living_champions(1):
+		for champ: ChampionState in state.get_living_champions(local_pid):
 			caster_id = champ.unique_id
 			break
 
+	if is_network_game and not network_proxy.is_host:
+		# Guest: send request to host
+		network_proxy.send_cast_request(selected_card, caster_id, [direction])
+		hand_ui.clear_selection()
+		_reset_input_state()
+		return
+
 	# Cast the card with direction as context
-	# For now, pass direction as a string in targets array
 	print("Casting %s in direction %s" % [selected_card, direction])
 	var result := game_controller.cast_card(selected_card, caster_id, [direction])
 	print("Cast result: %s" % result)
 
 	if result.get("success", false):
-		hand_ui.play_card_fly_animation(selected_card)
+		_play_card_cast_vfx(selected_card)
 		hand_ui.clear_selection()
 		_update_after_action()
 		_reset_input_state()
+		if is_network_game and network_proxy.is_host:
+			network_proxy.broadcast_action("cast", {
+				"card_name": selected_card,
+				"caster_id": caster_id,
+				"targets": [direction]
+			}, result)
+			network_proxy.broadcast_state_sync()
 	else:
 		var error: String = result.get("error", "Cast failed")
 		print("Cast failed: %s" % error)
@@ -1669,9 +1975,10 @@ func _try_cast_on_position(target_pos: Vector2i) -> void:
 
 	# Get caster
 	var state := game_controller.get_game_state()
+	var local_pid := NetworkManager.local_player_id if is_network_game else 1
 	var caster_id := selected_champion_id
 	if caster_id.is_empty():
-		for champ: ChampionState in state.get_living_champions(1):
+		for champ: ChampionState in state.get_living_champions(local_pid):
 			caster_id = champ.unique_id
 			break
 
@@ -1680,15 +1987,30 @@ func _try_cast_on_position(target_pos: Vector2i) -> void:
 
 	# Pass position as target (convert to string for now)
 	var pos_str := "%d,%d" % [target_pos.x, target_pos.y]
+
+	if is_network_game and not network_proxy.is_host:
+		# Guest: send request to host
+		network_proxy.send_cast_request(selected_card, caster_id, [pos_str])
+		hand_ui.clear_selection()
+		_reset_input_state()
+		return
+
 	print("Casting %s at position %s" % [selected_card, pos_str])
 	var result := game_controller.cast_card(selected_card, caster_id, [pos_str])
 	print("Cast result: %s" % result)
 
 	if result.get("success", false):
-		hand_ui.play_card_fly_animation(selected_card)
+		_play_card_cast_vfx(selected_card)
 		hand_ui.clear_selection()
 		_update_after_action()
 		_reset_input_state()
+		if is_network_game and network_proxy.is_host:
+			network_proxy.broadcast_action("cast", {
+				"card_name": selected_card,
+				"caster_id": caster_id,
+				"targets": [pos_str]
+			}, result)
+			network_proxy.broadcast_state_sync()
 	else:
 		var error: String = result.get("error", "Cast failed")
 		print("Cast failed: %s" % error)
@@ -1734,6 +2056,7 @@ func _start_immediate_movement_for_next_champion() -> void:
 		# All immediate movements done - resolve pending action
 		print("All immediate movements completed")
 		_immediate_move_champion_id = ""
+		_hide_skip_move_button()
 		input_mode = InputMode.SELECT_CHAMPION
 		if active_board:
 			active_board.clear_highlights()
@@ -1765,7 +2088,9 @@ func _start_immediate_movement_for_next_champion() -> void:
 		active_board.select_champion(_immediate_move_champion_id)
 		active_board.show_move_highlights(valid_moves)
 
-	hud.show_message("Move %s (immediate)" % champion.champion_name, 5.0)
+	hud.show_message("Move %s (click tile or press Skip)" % champion.champion_name, 5.0)
+	# Show skip button so player can choose not to move this champion
+	_show_skip_move_button()
 
 
 func _try_immediate_move(position: Vector2i) -> void:
@@ -1807,6 +2132,37 @@ func _try_immediate_move(position: Vector2i) -> void:
 		active_board.update_champion_positions()
 
 	# Move to next champion or finish
+	_hide_skip_move_button()
+	_start_immediate_movement_for_next_champion()
+
+
+func _show_skip_move_button() -> void:
+	"""Show a Skip button during immediate movement phase."""
+	if _skip_move_button != null:
+		return  # Already showing
+	_skip_move_button = Button.new()
+	_skip_move_button.text = "Skip Move"
+	_skip_move_button.custom_minimum_size = Vector2(120, 36)
+	_skip_move_button.position = Vector2(900, 680)
+	_skip_move_button.pressed.connect(_on_skip_move_pressed)
+	# Style the button
+	_skip_move_button.add_theme_font_size_override("font_size", 14)
+	add_child(_skip_move_button)
+
+
+func _hide_skip_move_button() -> void:
+	"""Remove the skip move button."""
+	if _skip_move_button != null:
+		_skip_move_button.queue_free()
+		_skip_move_button = null
+
+
+func _on_skip_move_pressed() -> void:
+	"""Player chose to skip moving this champion."""
+	if _immediate_move_champion_id.is_empty():
+		return
+	print("Player skipped immediate move for: %s" % _immediate_move_champion_id)
+	_hide_skip_move_button()
 	_start_immediate_movement_for_next_champion()
 
 
@@ -1862,6 +2218,113 @@ func _ai_handle_immediate_move(champion_id: String) -> void:
 			active_board.update_champion_positions()
 	else:
 		print("AI immediate move: %s stayed at %s" % [champ.champion_name, champ.position])
+
+
+# === Placement Selection Handling (Heave) ===
+
+func _on_placement_selection_required(player_id: int, champion_id: String, valid_positions: Array) -> void:
+	"""Handle placement selection request from Heave (anyEmpty move)."""
+	print("Placement selection required for champion: %s (player: %d)" % [champion_id, player_id])
+
+	var local_pid := NetworkManager.local_player_id if is_network_game else 1
+
+	# AI auto-selects placement
+	if player_id != local_pid:
+		_ai_handle_placement(champion_id, valid_positions)
+		return
+
+	# Human player - enter placement mode
+	_placement_champion_id = champion_id
+	_placement_valid_positions = valid_positions
+	input_mode = InputMode.SELECT_PLACEMENT
+
+	var state := game_controller.get_game_state()
+	var champ := state.get_champion(champion_id)
+	var champ_name: String = champ.champion_name if champ else "Champion"
+
+	var active_board = get_active_board()
+	if active_board:
+		active_board.clear_highlights()
+		# Convert Array to typed array for highlight display
+		var typed_positions: Array[Vector2i] = []
+		for pos in valid_positions:
+			typed_positions.append(pos as Vector2i)
+		active_board.show_cast_highlights(typed_positions)
+
+	hud.show_message("Select destination for %s" % champ_name, 10.0)
+
+
+func _try_placement(position: Vector2i) -> void:
+	"""Handle placement destination selection."""
+	if _placement_champion_id.is_empty():
+		return
+
+	if position not in _placement_valid_positions:
+		hud.show_message("Invalid destination", 1.0)
+		return
+
+	# Execute the placement
+	var result := game_controller.resolve_placement(position)
+
+	if result.get("success", false):
+		var champ_id: String = result.get("champion_id", "")
+		print("Placement: %s moved to %s" % [champ_id, position])
+
+		var active_board = get_active_board()
+		if active_board:
+			active_board.animate_move(champ_id, [position] as Array[Vector2i])
+			await get_tree().create_timer(0.3).timeout
+			active_board.update_champion_positions()
+	else:
+		print("Placement failed: %s" % result.get("error", "unknown"))
+
+	# Reset placement state
+	_placement_champion_id = ""
+	_placement_valid_positions = []
+	_reset_input_state()
+	_update_ui()
+
+
+func _ai_handle_placement(champion_id: String, valid_positions: Array) -> void:
+	"""AI auto-selects a placement destination (picks strategically bad position for enemy)."""
+	var state := game_controller.get_game_state()
+	var champ := state.get_champion(champion_id)
+	if champ == null or valid_positions.is_empty():
+		return
+
+	# Place the enemy in the worst position: nearest to a corner, far from allies
+	var best_pos: Vector2i = valid_positions[0] as Vector2i
+	var best_score: float = -999.0
+
+	var allies := state.get_living_champions(champ.owner_id)
+
+	for pos_variant in valid_positions:
+		var pos: Vector2i = pos_variant as Vector2i
+		var score: float = 0.0
+
+		# Prefer corners (closer to edges = higher score)
+		var edge_dist_x: float = minf(float(pos.x), float(9 - pos.x))
+		var edge_dist_y: float = minf(float(pos.y), float(9 - pos.y))
+		score += (5.0 - edge_dist_x) + (5.0 - edge_dist_y)
+
+		# Prefer far from target's allies (isolation)
+		for ally: ChampionState in allies:
+			if ally.unique_id != champion_id and ally.is_alive():
+				var dist: float = float(absi(pos.x - ally.position.x) + absi(pos.y - ally.position.y))
+				score += dist * 0.5
+
+		if score > best_score:
+			best_score = score
+			best_pos = pos
+
+	# Execute the placement
+	var result := game_controller.resolve_placement(best_pos)
+	if result.get("success", false):
+		print("AI placement: %s moved to %s" % [champ.champion_name, best_pos])
+		var active_board = get_active_board()
+		if active_board:
+			active_board.animate_move(champion_id, [best_pos] as Array[Vector2i])
+			active_board.update_champion_positions()
 
 
 # === Mind Control Handling (Betrayal) ===
@@ -2736,7 +3199,8 @@ func _on_response_card_removed(card_name: String) -> void:
 	"""Handle removing a card from the response slot - return to hand."""
 	print("Game: _on_response_card_removed called for: %s" % card_name)
 	var state := game_controller.get_game_state()
-	var returned := state.clear_response_slot(1)
+	var local_pid := NetworkManager.local_player_id if is_network_game else 1
+	var returned := state.clear_response_slot(local_pid)
 	print("Game: clear_response_slot returned: %s" % returned)
 	if not returned.is_empty():
 		hud.show_message("Returned " + returned + " to hand", 1.5)
@@ -2760,6 +3224,8 @@ func _place_card_in_response_slot(card_name: String) -> void:
 		print("  ERROR: game_state is null!")
 		return
 
+	var local_pid := NetworkManager.local_player_id if is_network_game else 1
+
 	# Check if it's actually a response card
 	var card_data := CardDatabase.get_card(card_name)
 	print("  Card data: %s" % card_data)
@@ -2769,7 +3235,7 @@ func _place_card_in_response_slot(card_name: String) -> void:
 		return
 
 	# Check if card is in hand
-	var hand := state.get_hand(1)
+	var hand := state.get_hand(local_pid)
 	print("  Hand contents: %s" % hand)
 	if card_name not in hand:
 		hud.show_message("Card not in hand", 1.5)
@@ -2778,12 +3244,15 @@ func _place_card_in_response_slot(card_name: String) -> void:
 
 	# Place the card in the slot
 	print("  Attempting to set response slot...")
-	if state.set_response_slot(1, card_name):
+	if state.set_response_slot(local_pid, card_name):
 		var trigger: String = card_data.get("trigger", "")
 		hud.show_message("Response ready: " + card_name + " (triggers on " + trigger + ")", 2.0)
 		print("  SUCCESS: Card placed in slot")
 		_update_ui()
 		response_slot.update_slot()
+		# Notify opponent about response slot change in network games
+		if is_network_game and network_proxy:
+			network_proxy.send_response_slot_request(local_pid, card_name)
 	else:
 		hud.show_message("Failed to place card in slot", 1.5)
 		print("  FAILED: set_response_slot returned false")
@@ -2793,3 +3262,74 @@ func _update_response_slot() -> void:
 	"""Update the response slot display."""
 	if response_slot:
 		response_slot.update_slot()
+
+
+# === Network Multiplayer Handlers ===
+
+func _on_remote_action(action: Dictionary) -> void:
+	"""Handle action received from remote opponent (via NetworkGameProxy)."""
+	print("Game: Remote action received: %s" % action)
+
+	# Update board visuals and UI after remote action
+	var active_board = get_active_board()
+	if active_board:
+		active_board.update_champion_positions()
+		active_board.update_champion_hp()
+		active_board.update_terrain()
+	_update_ui()
+
+
+func _on_remote_end_turn() -> void:
+	"""Handle remote opponent ending their turn."""
+	print("Game: Remote opponent ended turn")
+	# The GameController on host already processed this via NetworkGameProxy
+	# On guest, the state sync will update everything
+	# Just update UI to reflect the change
+	_update_ui()
+
+
+func _on_state_sync_applied() -> void:
+	"""Handle state sync applied from host (guest only)."""
+	print("Game: State sync applied")
+	var active_board = get_active_board()
+	if active_board:
+		active_board.update_champion_positions()
+		active_board.update_champion_hp()
+		active_board.update_terrain()
+	_update_ui()
+
+	# Check if it's now local player's turn
+	if network_proxy and network_proxy.is_local_player_turn():
+		is_player_turn = true
+		hud.show_message("Your turn!")
+		hud.set_action_buttons_enabled(true)
+	else:
+		is_player_turn = false
+		hud.set_action_buttons_enabled(false)
+
+
+func _on_opponent_disconnected() -> void:
+	"""Handle opponent disconnecting during game."""
+	print("Game: Opponent disconnected!")
+	hud.show_message("Opponent disconnected!")
+	hud.set_action_buttons_enabled(false)
+
+	# Show disconnect overlay
+	var overlay := ColorRect.new()
+	overlay.color = Color(0, 0, 0, 0.6)
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	hud.add_child(overlay)
+
+	var label := Label.new()
+	label.text = "OPPONENT DISCONNECTED"
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.set_anchors_preset(Control.PRESET_CENTER)
+	label.offset_left = -300
+	label.offset_right = 300
+	label.offset_top = -40
+	label.offset_bottom = 40
+	label.add_theme_font_size_override("font_size", 36)
+	label.add_theme_color_override("font_color", Color(1.0, 0.4, 0.3))
+	hud.add_child(label)

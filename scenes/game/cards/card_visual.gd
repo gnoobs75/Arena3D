@@ -7,8 +7,8 @@ signal card_clicked(card_name: String)
 signal card_hovered(card_name: String)
 signal card_unhovered(card_name: String)
 
-const HOVER_LIFT := 20
-const HOVER_SCALE := 1.02
+const HOVER_LIFT := 30
+const HOVER_SCALE := 1.05
 const CHARACTER_ART_PATH := "res://assets/art/characters/"
 
 # UI overlay colors
@@ -21,6 +21,7 @@ var is_playable: bool = true
 var is_hovered: bool = false
 var is_face_down: bool = false
 var is_selected: bool = false  # For multi-select mode
+var cost_override: int = -1  # -1 = use base cost, >= 0 = use this cost (for ifDrawnStart etc.)
 var original_position: Vector2 = Vector2.ZERO
 var character_texture: Texture2D = null
 var _playable_glow_time: float = 0.0
@@ -225,7 +226,9 @@ func _draw_card_front() -> void:
 	var h := size.y
 	var card_type: String = card_data.get("type", "Action")
 	var champion: String = card_data.get("character", "")
-	var cost: int = card_data.get("cost", 0)
+	var base_cost: int = card_data.get("cost", 0)
+	var cost: int = cost_override if cost_override >= 0 else base_cost
+	var is_cost_reduced: bool = cost < base_cost
 	var font := ThemeDB.fallback_font
 
 	# Get colors for card type border
@@ -283,20 +286,45 @@ func _draw_card_front() -> void:
 	# Cost shadow
 	draw_circle(cost_center + VisualTheme.SHADOW_OFFSET_SMALL, cost_size / 2, VisualTheme.SHADOW_COLOR)
 
+	# Cost-reduced glow effect (pulsing lightning/energy ring)
+	if is_cost_reduced and is_playable:
+		var pulse := 0.6 + sin(_playable_glow_time * 4.0) * 0.4
+		# Outer energy glow
+		draw_circle(cost_center, cost_size / 2 + 4, Color(0.2, 0.7, 1.0, 0.25 * pulse))
+		draw_circle(cost_center, cost_size / 2 + 2, Color(0.3, 0.8, 1.0, 0.3 * pulse))
+		# Electric arc ring
+		draw_arc(cost_center, cost_size / 2 + 3, _playable_glow_time * 2.0, _playable_glow_time * 2.0 + TAU, 24, Color(0.4, 0.9, 1.0, 0.5 * pulse), 1.5)
+
 	# Cost circle with gradient effect (draw concentric circles)
-	var cost_bg_outer := OVERLAY_BG.lerp(Color.BLACK, 0.1) if is_playable else Color(0.12, 0.12, 0.15, 0.9)
-	var cost_bg_inner := OVERLAY_BG.lerp(Color.WHITE, 0.05) if is_playable else Color(0.18, 0.18, 0.2, 0.9)
+	var cost_bg_outer: Color
+	var cost_bg_inner: Color
+	if is_cost_reduced and is_playable:
+		cost_bg_outer = Color(0.05, 0.15, 0.3, 0.9)
+		cost_bg_inner = Color(0.1, 0.25, 0.4, 0.9)
+	elif is_playable:
+		cost_bg_outer = OVERLAY_BG.lerp(Color.BLACK, 0.1)
+		cost_bg_inner = OVERLAY_BG.lerp(Color.WHITE, 0.05)
+	else:
+		cost_bg_outer = Color(0.12, 0.12, 0.15, 0.9)
+		cost_bg_inner = Color(0.18, 0.18, 0.2, 0.9)
 	draw_circle(cost_center, cost_size / 2, cost_bg_outer)
 	draw_circle(cost_center, cost_size / 2 - 3, cost_bg_inner)
 
 	# Cost border with highlight
-	draw_arc(cost_center, cost_size / 2, 0, TAU, 32, OVERLAY_BORDER, 2.0)
+	var border_col := Color(0.3, 0.7, 1.0, 0.9) if is_cost_reduced and is_playable else OVERLAY_BORDER
+	draw_arc(cost_center, cost_size / 2, 0, TAU, 32, border_col, 2.0)
 	draw_arc(cost_center, cost_size / 2 - 1, PI * 1.25, PI * 1.75, 16, VisualTheme.BEVEL_HIGHLIGHT, 1.0)  # Top highlight
 
 	# Cost number with shadow
 	var cost_str := str(cost)
 	var cost_text_pos := cost_center + Vector2(-4, 6)
-	var cost_color := Color(1.0, 0.9, 0.5) if is_playable else Color(0.5, 0.5, 0.5)
+	var cost_color: Color
+	if is_cost_reduced and is_playable:
+		cost_color = Color(0.3, 0.9, 1.0)  # Electric blue for reduced cost
+	elif is_playable:
+		cost_color = Color(1.0, 0.9, 0.5)
+	else:
+		cost_color = Color(0.5, 0.5, 0.5)
 	VisualTheme.draw_text_shadow(self, font, cost_text_pos, cost_str, VisualTheme.FONT_CARD_COST, cost_color)
 
 	# === NAME OVERLAY (Top Middle) ===
@@ -373,16 +401,17 @@ func _draw_card_front() -> void:
 
 	# === PLAYABILITY / HOVER INDICATOR ===
 	if is_playable and is_hovered and not is_selected:
-		# Outer glow effect when playable and hovered
-		for i in range(3, 0, -1):
-			var glow_alpha := 0.15 * (1.0 - float(i) / 3.0)
-			draw_rect(Rect2(-i, -i, w + i * 2, h + i * 2), Color(1.0, 0.95, 0.6, glow_alpha), false, 2.0)
-		draw_rect(Rect2(0, 0, w, h), Color(1, 1, 0.7, 0.15))
-		draw_rect(Rect2(0, 0, w, h), Color(1, 1, 0.5, 0.9), false, 2.0)
+		# 4-layer golden hover glow
+		for i in range(VisualTheme.CARD_GLOW_LAYERS, 0, -1):
+			var glow_alpha := 0.2 * (1.0 - float(i) / float(VisualTheme.CARD_GLOW_LAYERS))
+			draw_rect(Rect2(-i * 2, -i * 2, w + i * 4, h + i * 4), Color(1.0, 0.9, 0.4, glow_alpha), false, 2.5)
+		draw_rect(Rect2(0, 0, w, h), Color(1, 1, 0.7, 0.18))
+		draw_rect(Rect2(0, 0, w, h), Color(1, 0.95, 0.5, 1.0), false, 2.5)
 	elif is_playable and not is_hovered and not is_selected and not is_face_down:
-		# Subtle breathing border glow on playable cards
+		# Stronger breathing border pulse on playable cards
 		var pulse := (sin(_playable_glow_time) + 1.0) * 0.5  # 0 to 1
-		var glow_alpha := 0.1 + pulse * 0.15
+		var glow_alpha := VisualTheme.CARD_PLAYABLE_PULSE_MIN + pulse * (VisualTheme.CARD_PLAYABLE_PULSE_MAX - VisualTheme.CARD_PLAYABLE_PULSE_MIN)
+		draw_rect(Rect2(-1, -1, w + 2, h + 2), Color(0.7, 0.85, 1.0, glow_alpha * 0.5), false, 2.0)
 		draw_rect(Rect2(0, 0, w, h), Color(0.8, 0.9, 1.0, glow_alpha), false, 1.5)
 
 
@@ -437,7 +466,7 @@ func _on_mouse_entered() -> void:
 	original_position = position
 	z_index = 10
 
-	# Smooth hover lift with scale
+	# Smooth hover lift with scale + subtle tilt
 	if _hover_tween and _hover_tween.is_valid():
 		_hover_tween.kill()
 	pivot_offset = size / 2
@@ -445,6 +474,7 @@ func _on_mouse_entered() -> void:
 	_hover_tween.set_parallel(true)
 	_hover_tween.tween_property(self, "position:y", original_position.y - HOVER_LIFT, 0.15).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
 	_hover_tween.tween_property(self, "scale", Vector2(HOVER_SCALE, HOVER_SCALE), 0.12).set_ease(Tween.EASE_OUT)
+	_hover_tween.tween_property(self, "rotation_degrees", VisualTheme.CARD_HOVER_TILT, 0.12).set_ease(Tween.EASE_OUT)
 
 	queue_redraw()
 	card_hovered.emit(card_name)
@@ -454,13 +484,14 @@ func _on_mouse_exited() -> void:
 	is_hovered = false
 	z_index = 0
 
-	# Smooth return
+	# Smooth return with tilt reset
 	if _hover_tween and _hover_tween.is_valid():
 		_hover_tween.kill()
 	_hover_tween = create_tween()
 	_hover_tween.set_parallel(true)
 	_hover_tween.tween_property(self, "position", original_position, 0.12).set_ease(Tween.EASE_IN_OUT)
 	_hover_tween.tween_property(self, "scale", Vector2.ONE, 0.12).set_ease(Tween.EASE_IN_OUT)
+	_hover_tween.tween_property(self, "rotation_degrees", 0.0, 0.12).set_ease(Tween.EASE_IN_OUT)
 
 	queue_redraw()
 	card_unhovered.emit(card_name)

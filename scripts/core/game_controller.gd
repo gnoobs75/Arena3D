@@ -15,6 +15,7 @@ signal response_slot_triggered(player_id: int, card_name: String, trigger: Strin
 signal x_value_required(player_id: int, card_name: String, min_val: int, max_val: int)
 signal choice_required(player_id: int, options: Array, choose_count: int, context: Dictionary)
 signal position_selection_required(player_id: int, valid_positions: Array, context: Dictionary)
+signal placement_selection_required(player_id: int, champion_id: String, valid_positions: Array)
 
 # Core systems
 var game_state: GameState
@@ -94,6 +95,7 @@ func _connect_signals() -> void:
 	effect_processor.x_value_required.connect(_on_x_value_required)
 	effect_processor.choice_required.connect(_on_choice_required)
 	effect_processor.position_selection_required.connect(_on_position_required)
+	effect_processor.placement_selection_required.connect(_on_placement_required)
 
 
 func start_game() -> void:
@@ -336,7 +338,7 @@ func _execute_cast(action: ActionSystem.CastCardAction, targets: Array) -> Dicti
 		var caster := game_state.get_champion(action.caster_id)
 
 		# Emit to EventBus for combat log
-		EventBus.card_played.emit(caster.owner_id, action.card_name, targets)
+		EventBus.card_played.emit(caster.owner_id, action.card_name, targets, caster.unique_id)
 		var card_data := CardDatabase.get_card(action.card_name)
 		var cost: int = card_data.get("cost", 0)
 		if cost > 0:
@@ -630,14 +632,12 @@ func _check_trigger(trigger: String, context: Dictionary) -> bool:
 	# Try responding player's slot first
 	var slot_result := _try_auto_cast_from_slot(responding_player, trigger, context)
 	if slot_result.get("cast", false):
-		print("Response card auto-cast from player %d slot: %s" % [responding_player, slot_result.get("card", "")])
 		any_cast = true
 
 	# Then try active player's slot (for triggers like endTurn/startTurn)
 	if responding_player != active:
 		slot_result = _try_auto_cast_from_slot(active, trigger, context)
 		if slot_result.get("cast", false):
-			print("Response card auto-cast from player %d slot: %s" % [active, slot_result.get("card", "")])
 			any_cast = true
 
 	# For beforeDamage and onCast triggers, return true if a response fired
@@ -689,8 +689,6 @@ func _try_auto_cast_from_slot(player_id: int, trigger: String, context: Dictiona
 	if slot_card.is_empty():
 		return {"cast": false}
 
-	print("GameController: Checking auto-cast for player %d, slot card '%s', trigger '%s'" % [player_id, slot_card, trigger])
-
 	var card_data := CardDatabase.get_card(slot_card)
 	if card_data.is_empty():
 		return {"cast": false}
@@ -698,7 +696,6 @@ func _try_auto_cast_from_slot(player_id: int, trigger: String, context: Dictiona
 	# Verify the card's trigger matches
 	var card_trigger: String = card_data.get("trigger", "")
 	if card_trigger != trigger:
-		print("GameController: Trigger mismatch - card has '%s', event is '%s'" % [card_trigger, trigger])
 		return {"cast": false}
 
 	# Check mana cost
@@ -735,7 +732,7 @@ func _try_auto_cast_from_slot(player_id: int, trigger: String, context: Dictiona
 	response_slot_triggered.emit(player_id, slot_card, trigger)
 
 	# Emit events for combat log
-	EventBus.card_played.emit(player_id, slot_card, targets)
+	EventBus.card_played.emit(player_id, slot_card, targets, caster.unique_id)
 	if cost > 0:
 		EventBus.mana_spent.emit(player_id, cost, slot_card)
 
@@ -1018,6 +1015,19 @@ func complete_choice_selection(choices: Array) -> Dictionary:
 func complete_position_selection(position: Vector2i) -> Dictionary:
 	"""Complete position selection from UI/AI."""
 	return effect_processor.complete_position_selection(position)
+
+
+func _on_placement_required(player_id: int, champion_id: String, valid_positions: Array) -> void:
+	"""Forward placement selection request to UI."""
+	placement_selection_required.emit(player_id, champion_id, valid_positions)
+
+
+func resolve_placement(destination: Vector2i) -> Dictionary:
+	"""Resolve placement selection from UI/AI (Heave anyEmpty)."""
+	var result := effect_processor.resolve_placement(destination)
+	if result.get("success", false):
+		_check_win_condition()
+	return result
 
 
 func has_pending_input() -> bool:

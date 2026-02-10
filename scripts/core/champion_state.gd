@@ -356,6 +356,8 @@ func can_cast() -> bool:
 		return false
 	if has_debuff("stunned"):
 		return false
+	if has_debuff("hypnotized"):
+		return false
 	return true
 
 

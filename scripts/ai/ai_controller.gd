@@ -128,6 +128,9 @@ func take_turn() -> void:
 	_champion_action_count.clear()
 	_champion_needs_followup.clear()
 
+	# Break free from Hypnotize if possible (pay 2 mana per champion)
+	_try_break_hypnotize()
+
 	# Manage response slot at start of turn
 	_manage_response_slot()
 
@@ -608,6 +611,16 @@ func _get_position_targets(state: GameState, caster: ChampionState, card_data: D
 			for offset: Vector2i in adjacent_offsets:
 				var adj_pos := enemy.position + offset
 				if state.is_valid_position(adj_pos) and _is_position_in_caster_range(caster, adj_pos):
+					# Check if the push would actually move the enemy
+					# Push direction goes FROM target position TOWARD enemy
+					var push_dir := Vector2i(
+						signi(enemy.position.x - adj_pos.x),
+						signi(enemy.position.y - adj_pos.y)
+					)
+					# Enemy must have room to move in push direction
+					var next_pos := enemy.position + push_dir
+					if not state.is_walkable(next_pos):
+						continue  # Enemy is already at wall in push direction, skip
 					var pos_str := "%d,%d" % [adj_pos.x, adj_pos.y]
 					if not added_positions.has(pos_str):
 						added_positions[pos_str] = true
@@ -763,6 +776,7 @@ func _would_card_have_effect(state: GameState, caster: ChampionState, card_data:
 	var effects: Array = card_data.get("effect", [])
 	var opp_id := 1 if player_id == 2 else 2
 	var card_target: String = str(card_data.get("target", "")).to_lower()
+	var card_name: String = str(card_data.get("name", ""))
 
 	# === CHECK CARD-LEVEL CONDITIONS ===
 	var card_condition: Dictionary = card_data.get("condition", {})
@@ -778,10 +792,20 @@ func _would_card_have_effect(state: GameState, caster: ChampionState, card_data:
 			if _is_in_caster_range(enemy, caster, state):
 				return false
 
-	# === SPECIAL: Pure self-heal cards — check if caster needs healing ===
-	if card_target == "self" and _is_pure_heal_card(effects):
+	# === SPECIAL: Self-targeted cards with heal — check if caster needs healing ===
+	# For cards like Nap Time (heal + self-debuff), if the heal is the only benefit
+	# and caster is at full HP, the card is wasted (self-debuffs are costs, not benefits)
+	if card_target == "self" and _has_heal_effect(effects):
 		if caster.current_hp >= caster.max_hp:
-			return false  # Already at full HP, heal is wasted
+			# Check if the card has any non-heal, non-debuff effects that would be useful
+			var has_useful_non_heal := false
+			for eff: Dictionary in effects:
+				var et: String = str(eff.get("type", "")).to_lower()
+				if et != "heal" and et != "debuff":
+					has_useful_non_heal = true
+					break
+			if not has_useful_non_heal:
+				return false  # Only heal + self-debuffs, and caster is at full HP
 
 	# === SPECIAL: Cards with both extraMove AND extraAttack (e.g., Endless Energy) ===
 	# These are powerful combo cards - useful if enemies exist and caster can fight
@@ -828,18 +852,24 @@ func _would_card_have_effect(state: GameState, caster: ChampionState, card_data:
 		# --- DAMAGE checks ---
 		if etype == "damage":
 			var is_aoe := scope in ["enemies", "allenemies", "all_enemies", "all"]
+			# Calculate expected damage for protection check
+			var expected_dmg := 0
+			if effect_value is int:
+				expected_dmg = int(effect_value)
+			elif effect_value is String:
+				expected_dmg = _calculate_effect_value(str(effect_value), caster, state, effect_condition)
 			# Check if at least one valid target exists without full damage protection
 			var has_damageable_target := false
 			if scope == "enemies":
 				for enemy: ChampionState in state.get_living_champions(opp_id):
-					if _is_in_caster_range(caster, enemy, state) and not _has_full_damage_protection(enemy, is_aoe):
+					if _is_in_caster_range(caster, enemy, state) and not _has_full_damage_protection(enemy, is_aoe, expected_dmg):
 						has_damageable_target = true
 						break
 				if not has_damageable_target:
 					continue
 			elif scope in ["randomenemy", "allenemies", "all_enemies"]:
 				for enemy: ChampionState in state.get_living_champions(opp_id):
-					if not _has_full_damage_protection(enemy, is_aoe):
+					if not _has_full_damage_protection(enemy, is_aoe, expected_dmg):
 						has_damageable_target = true
 						break
 				if not has_damageable_target:
@@ -847,7 +877,7 @@ func _would_card_have_effect(state: GameState, caster: ChampionState, card_data:
 			elif scope == "all":
 				# AOE all - useful if any enemy can be damaged
 				for enemy: ChampionState in state.get_living_champions(opp_id):
-					if not _has_full_damage_protection(enemy, true):
+					if not _has_full_damage_protection(enemy, true, expected_dmg):
 						has_damageable_target = true
 						break
 				if not has_damageable_target:
@@ -855,7 +885,7 @@ func _would_card_have_effect(state: GameState, caster: ChampionState, card_data:
 			# Single target damage with target "enemy" — need living unprotected enemies
 			elif card_target == "enemy":
 				for enemy: ChampionState in state.get_living_champions(opp_id):
-					if not _has_full_damage_protection(enemy, is_aoe):
+					if not _has_full_damage_protection(enemy, is_aoe, expected_dmg):
 						has_damageable_target = true
 						break
 				if not has_damageable_target:
@@ -927,6 +957,15 @@ func _would_card_have_effect(state: GameState, caster: ChampionState, card_data:
 					source_pile = state.get_discard(player_id)
 				if source_pile.is_empty():
 					continue
+				# For own discard: exclude the card itself (it goes to discard when cast,
+				# then can't retrieve itself - e.g. Refocus)
+				if draw_from == "discard" and draw_source not in ["oppdiscard", "opponentdiscard"]:
+					var non_self_count := 0
+					for discard_card_check: String in source_pile:
+						if discard_card_check != card_name:
+							non_self_count += 1
+					if non_self_count == 0:
+						continue  # Only card in discard would be this card itself
 				# Check if any card in the discard pile matches the filter conditions
 				var filter_char: String = str(effect_condition.get("filter", "")).to_lower()
 				var max_cost: int = effect_condition.get("maxCost", -1)
@@ -958,8 +997,8 @@ func _would_card_have_effect(state: GameState, caster: ChampionState, card_data:
 				var filter_char: String = str(effect_condition.get("filter", "")).to_lower()
 				if not filter_char.is_empty():
 					var has_match := false
-					for card_name: String in deck:
-						var deck_card := CardDatabase.get_card(card_name)
+					for deck_card_name: String in deck:
+						var deck_card := CardDatabase.get_card(deck_card_name)
 						var card_char: String = str(deck_card.get("character", "")).to_lower()
 						if card_char == filter_char.to_lower():
 							has_match = true
@@ -1046,19 +1085,44 @@ func _would_card_have_effect(state: GameState, caster: ChampionState, card_data:
 			var stat_name: String = str(effect.get("stat", "")).to_lower()
 			var duration: String = str(effect.get("duration", "")).to_lower()
 
-			# Power boost — only useful if we haven't attacked yet and can attack this turn
-			if stat_name == "power" and duration == "thisturn":
-				if caster.has_attacked and not caster.has_buff("extraAttack"):
-					continue  # Already attacked, buff is wasted
-				if not _can_attack_any_enemy_this_turn(state, caster):
-					continue
+			# For friendly-targeted cards, the buff applies to the TARGET, not the caster
+			# Check if ANY eligible target could benefit (don't filter at caster level)
+			var is_friendly_buff := card_target in ["friendly", "ally", "allyorself"]
 
-			# Range boost (thisTurn) — only useful if we haven't attacked yet and can attack
+			# Power boost — only useful if buff recipient hasn't attacked yet and can attack
+			if stat_name == "power" and duration == "thisturn":
+				if is_friendly_buff:
+					# Check if any ally could benefit from the buff
+					var any_ally_can_use := false
+					for ally: ChampionState in state.get_living_champions(player_id):
+						if ally.unique_id == caster.unique_id and card_target != "allyorself":
+							continue
+						if not ally.has_attacked or ally.has_buff("extraAttack"):
+							if _can_attack_any_enemy_this_turn(state, ally):
+								any_ally_can_use = true
+								break
+					if not any_ally_can_use:
+						continue
+				else:
+					if caster.has_attacked and not caster.has_buff("extraAttack"):
+						continue  # Already attacked, buff is wasted
+					if not _can_attack_any_enemy_this_turn(state, caster):
+						continue
+
+			# Range boost (thisTurn) — only useful if recipient hasn't attacked yet and can attack
 			elif stat_name == "range" and duration == "thisturn":
-				if caster.has_attacked and not caster.has_buff("extraAttack"):
+				if is_friendly_buff:
+					var any_ally_can_use := false
+					for ally: ChampionState in state.get_living_champions(player_id):
+						if ally.unique_id == caster.unique_id and card_target != "allyorself":
+							continue
+						if not ally.has_attacked or ally.has_buff("extraAttack"):
+							any_ally_can_use = true
+							break
+					if not any_ally_can_use:
+						continue
+				elif caster.has_attacked and not caster.has_buff("extraAttack"):
 					continue  # Already attacked, buff is wasted
-				if not _can_attack_any_enemy_this_turn(state, caster):
-					continue
 
 			# Movement boost (thisTurn) — only useful if we haven't already moved
 			elif stat_name in ["movement", "movementspeed"] and duration == "thisturn":
@@ -1118,30 +1182,29 @@ func _would_card_have_effect(state: GameState, caster: ChampionState, card_data:
 			if card_target == "enemy":
 				if state.get_living_champions(opp_id).is_empty():
 					continue
-			# overWall (Heave) — only useful if enemy is near a wall AND can be thrown over
-			# Enemy must be at position 1 or 8 (adjacent to wall) to be thrown over
-			# Position 0 or 9 is AT the edge, nothing on the other side
-			if move_value == "overwall":
-				var any_throwable := false
-				for enemy: ChampionState in state.get_living_champions(opp_id):
-					var p := enemy.position
-					# Can throw over if at position 1 or 8 (adjacent to wall, with space beyond)
-					if p.x == 1 or p.x == 8 or p.y == 1 or p.y == 8:
-						any_throwable = true
-						break
-				if not any_throwable:
-					continue
-			# toWall (Light Bomb) — only useful if some enemy is NOT already at a wall
-			# AND the enemy is close enough to be in potential AOE range
+			# anyEmpty (Heave) — always useful if living enemies exist (can place anywhere)
+			if move_value == "anyempty":
+				pass  # Always useful — placement is handled by game.gd
+			# toWall (Light Bomb) — only useful if enemy can actually be pushed
+			# Enemy must have room to move in at least one cardinal direction from caster
 			elif move_value == "towall":
 				var any_pushable := false
 				for enemy: ChampionState in state.get_living_champions(opp_id):
 					var p := enemy.position
-					# Not at wall if not at board edge (0 or 9 for a 10x10 board)
-					# AND enemy must be within reasonable distance from caster (AOE range ~3)
-					if p.x > 0 and p.x < 9 and p.y > 0 and p.y < 9:
+					# Enemy must not be at wall (positions 0 or 9)
+					if p.x <= 0 or p.x >= 9 or p.y <= 0 or p.y >= 9:
+						continue
+					# Check if enemy has room to be pushed in at least one direction
+					# (at least 2 tiles from a wall in some direction)
+					var has_push_room := (
+						state.is_walkable(p + Vector2i(1, 0)) or
+						state.is_walkable(p + Vector2i(-1, 0)) or
+						state.is_walkable(p + Vector2i(0, 1)) or
+						state.is_walkable(p + Vector2i(0, -1))
+					)
+					if has_push_room:
 						var dist := maxi(absi(caster.position.x - p.x), absi(caster.position.y - p.y))
-						if dist <= 5:  # Reasonable targeting distance for AOE
+						if dist <= 5:
 							any_pushable = true
 							break
 				if not any_pushable:
@@ -1164,9 +1227,19 @@ func _is_pure_heal_card(effects: Array) -> bool:
 	return not effects.is_empty()
 
 
-func _has_full_damage_protection(champion: ChampionState, is_aoe: bool) -> bool:
+func _has_heal_effect(effects: Array) -> bool:
+	"""Check if any of the card's effects are healing."""
+	for effect: Dictionary in effects:
+		var etype: String = str(effect.get("type", "")).to_lower()
+		if etype == "heal":
+			return true
+	return false
+
+
+func _has_full_damage_protection(champion: ChampionState, is_aoe: bool, damage_amount: int = 0) -> bool:
 	"""Check if a champion has protection that would completely block damage.
-	is_aoe: true if the damage source is AOE (stealth doesn't protect from AOE)"""
+	is_aoe: true if the damage source is AOE (stealth doesn't protect from AOE)
+	damage_amount: expected damage amount, used to check damageReduction"""
 	# Immune completely blocks all damage
 	if champion.has_buff("immune"):
 		return true
@@ -1179,6 +1252,11 @@ func _has_full_damage_protection(champion: ChampionState, is_aoe: bool) -> bool:
 	# Stealth only protects from non-AOE damage
 	if champion.has_buff("stealth") and not is_aoe:
 		return true
+	# damageReduction can reduce damage to 0
+	if damage_amount > 0:
+		var reduction := champion.get_buff_stacks("damageReduction")
+		if reduction >= damage_amount:
+			return true
 	return false
 
 
@@ -1325,6 +1403,75 @@ func _has_power_buff_available(state: GameState, champ: ChampionState) -> bool:
 				if (val is int and val > 0) or val is String:
 					return true
 	return false
+
+
+func _get_best_kill_target(state: GameState, attacker: ChampionState, buff_effects: Array) -> ChampionState:
+	"""Check if casting these buff effects would enable a kill on any enemy.
+	Estimates the attacker's boosted power and checks if any enemy would die."""
+	var opp_id := 1 if player_id == 2 else 2
+	# Calculate total power boost from these effects
+	var power_boost := 0
+	for eff: Dictionary in buff_effects:
+		var etype: String = str(eff.get("type", "")).to_lower()
+		var estat: String = str(eff.get("stat", "")).to_lower()
+		if etype == "statmod" and estat == "power":
+			var val = eff.get("value", 0)
+			if val is int:
+				var condition: Dictionary = eff.get("condition", {})
+				if condition.has("scale") and str(condition["scale"]) == "enemiesInRange":
+					# Count enemies in range
+					var range_calc := RangeCalculator.new()
+					var enemy_count := 0
+					for enemy: ChampionState in state.get_living_champions(opp_id):
+						if range_calc.can_attack(attacker, enemy, state):
+							enemy_count += 1
+					power_boost += val * enemy_count
+				else:
+					power_boost += val
+			elif val is String and val == "handSize":
+				power_boost += state.get_hand(attacker.owner_id).size()
+	# Also count other castable buff cards in hand for combo potential
+	var total_power := attacker.current_power + power_boost
+	# Also add power from other buff cards in hand that could be cast this turn
+	var hand := state.get_hand(attacker.owner_id)
+	var mana := state.get_mana(attacker.owner_id)
+	var card_cost_sum := 0
+	for card_name: String in hand:
+		var card_data := CardDatabase.get_card(card_name)
+		if card_data.is_empty():
+			continue
+		var card_type: String = str(card_data.get("type", "")).to_lower()
+		if card_type != "action":
+			continue
+		var card_char: String = str(card_data.get("character", ""))
+		var card_tgt: String = str(card_data.get("target", "")).to_lower()
+		var card_cost: int = card_data.get("cost", 0)
+		# Check if this card could buff the attacker
+		var could_buff_attacker := false
+		if card_tgt == "self" and card_char == attacker.champion_name:
+			could_buff_attacker = true
+		elif card_tgt in ["friendly", "ally", "allyorself"]:
+			could_buff_attacker = true
+		if not could_buff_attacker:
+			continue
+		if card_cost_sum + card_cost > mana:
+			continue
+		for eff: Dictionary in card_data.get("effect", []):
+			var etype: String = str(eff.get("type", "")).to_lower()
+			var estat: String = str(eff.get("stat", "")).to_lower()
+			if etype == "statmod" and estat == "power":
+				var val = eff.get("value", 0)
+				if val is int and val > 0:
+					total_power += val
+					card_cost_sum += card_cost
+					break  # Count this card once
+	# Check if boosted power could kill any enemy
+	var range_calc := RangeCalculator.new()
+	for enemy: ChampionState in state.get_living_champions(opp_id):
+		if range_calc.can_attack(attacker, enemy, state) or _can_move_into_attack_range(state, attacker):
+			if enemy.current_hp <= total_power:
+				return enemy
+	return null
 
 
 func _has_extra_move_card_in_hand(state: GameState, champ: ChampionState) -> bool:
@@ -1765,10 +1912,8 @@ func _score_attack(action: Dictionary, state: GameState) -> float:
 	if attacker == null or target == null:
 		return 0.0
 
-	# 0 power = 0 damage = pointless unless champion can buff power first
+	# 0 power = 0 damage = pointless (buff power first if possible)
 	if attacker.current_power <= 0:
-		if _has_power_buff_available(state, attacker):
-			return 1.0  # Very low — should buff first, then attack
 		return 0.0
 
 	var score := 15.0  # HIGH base attack value - attacking is the goal!
@@ -2041,19 +2186,54 @@ func _score_cast(action: Dictionary, state: GameState) -> float:
 						numeric_value = 2  # Average estimate
 					else:
 						numeric_value = 2  # Default estimate
+
+				# Account for condition.scale multipliers (e.g., Friends Forever: +1 per enemy in range)
+				var condition: Dictionary = effect.get("condition", {})
+				if condition.has("scale"):
+					var scale_type: String = str(condition["scale"])
+					if scale_type == "enemiesInRange":
+						# Count enemies in range of the buff recipient
+						var buff_recipient: ChampionState = caster
+						if not targets.is_empty():
+							var potential := state.get_champion(str(targets[0]))
+							if potential:
+								buff_recipient = potential
+						var enemy_count := 0
+						var opp_id := 1 if player_id == 2 else 2
+						var range_calc := RangeCalculator.new()
+						for enemy: ChampionState in state.get_living_champions(opp_id):
+							if range_calc.can_attack(buff_recipient, enemy, state):
+								enemy_count += 1
+						numeric_value *= enemy_count
+					elif scale_type == "discarded":
+						numeric_value *= 2  # Estimate average discards
+
+				# Determine the actual beneficiary of this buff
+				# For friendly-targeted cards (Encouragement), check the TARGET's state
+				var buff_beneficiary: ChampionState = caster
+				if card_target_type in ["friendly", "ally", "allyorself"] and not targets.is_empty():
+					var potential := state.get_champion(str(targets[0]))
+					if potential:
+						buff_beneficiary = potential
+				var beneficiary_has_attacked: bool = buff_beneficiary.has_attacked and not buff_beneficiary.has_buff("extraAttack")
+				var beneficiary_can_attack: bool = _can_attack_any_enemy_this_turn(state, buff_beneficiary)
+
 				if numeric_value > 0:
 					match stat:
 						"power":
-							if sm_duration == "thisturn" and caster.has_attacked and not caster.has_buff("extraAttack"):
+							if sm_duration == "thisturn" and beneficiary_has_attacked:
 								score += 0.0  # Wasted — already attacked
-							elif sm_duration == "thisturn" and not caster.has_attacked:
+							elif sm_duration == "thisturn" and not beneficiary_has_attacked:
 								score += numeric_value * 6.0  # High priority — buff BEFORE attacking
+								# Extra bonus if beneficiary can attack THIS turn
+								if beneficiary_can_attack:
+									score += numeric_value * 3.0  # Guaranteed damage increase
 							else:
 								score += numeric_value * 4.0
 						"range":
-							if sm_duration == "thisturn" and caster.has_attacked and not caster.has_buff("extraAttack"):
+							if sm_duration == "thisturn" and beneficiary_has_attacked:
 								score += 0.0  # Wasted
-							elif sm_duration == "thisturn" and not caster.has_attacked:
+							elif sm_duration == "thisturn" and not beneficiary_has_attacked:
 								score += numeric_value * 3.0  # Buff before attacking
 							else:
 								score += numeric_value * 2.0
@@ -2061,7 +2241,7 @@ func _score_cast(action: Dictionary, state: GameState) -> float:
 							score += numeric_value * 1.5
 						"random":
 							# Random stat boost (Versatility, Battlecry) — average usefulness
-							if sm_duration == "thisturn" and not caster.has_attacked:
+							if sm_duration == "thisturn" and not beneficiary_has_attacked:
 								score += numeric_value * 4.0  # Could be power
 							else:
 								score += numeric_value * 2.0
@@ -2181,7 +2361,13 @@ func _score_cast(action: Dictionary, state: GameState) -> float:
 			"draw":
 				var draw_count = effect.get("value", 1)
 				if draw_count is int:
-					score += draw_count * 2.0
+					var draw_condition: Dictionary = effect.get("condition", {})
+					var draw_from: String = str(draw_condition.get("from", "deck")).to_lower()
+					if draw_from == "oppdiscard":
+						# Giving opponent cards back is BAD - penalize heavily
+						score -= draw_count * 3.0
+					else:
+						score += draw_count * 2.0
 
 			"move":
 				# Movement effects (push, pull, etc.)
@@ -2206,11 +2392,21 @@ func _score_cast(action: Dictionary, state: GameState) -> float:
 	if cost > 0:
 		score = score * (1.0 + 1.0 / cost)
 
-	# Buff-before-attack priority: if this card buffs power/range and the caster
+	# Buff-before-attack priority: if this card buffs power/range and the beneficiary
 	# hasn't attacked yet but CAN attack, give a big priority bonus so it happens first
-	if not caster.has_attacked and _has_pre_attack_buff(effects):
-		if _can_attack_any_enemy_this_turn(state, caster):
+	if _has_pre_attack_buff(effects):
+		# Determine who benefits from the buff
+		var pre_atk_beneficiary: ChampionState = caster
+		if card_target_type in ["friendly", "ally", "allyorself"] and not targets.is_empty():
+			var potential := state.get_champion(str(targets[0]))
+			if potential:
+				pre_atk_beneficiary = potential
+		if not pre_atk_beneficiary.has_attacked and _can_attack_any_enemy_this_turn(state, pre_atk_beneficiary):
 			score += 10.0  # Cast buffs before attacking!
+			# Extra bonus for stacking multiple buffs into a kill
+			var kill_target := _get_best_kill_target(state, pre_atk_beneficiary, effects)
+			if kill_target:
+				score += 15.0  # This buff enables a kill — VERY high priority
 
 	return score
 
@@ -2430,6 +2626,19 @@ func _delay(seconds: float) -> void:
 		await tree.create_timer(seconds).timeout
 
 
+func _try_break_hypnotize() -> void:
+	"""Pay 2 mana to break free from Hypnotize on any AI champion."""
+	var state := game_controller.get_game_state()
+	for champ: ChampionState in state.get_living_champions(player_id):
+		if champ.has_debuff("hypnotized"):
+			var mana := state.get_mana(player_id)
+			if mana >= 2:
+				state.spend_mana(player_id, 2)
+				champ.remove_debuff("hypnotized")
+				champ.remove_buff("immune")
+				print("AI: Broke %s free from Hypnotize (paid 2 mana)" % champ.champion_name)
+
+
 func _manage_response_slot() -> void:
 	"""Evaluate and place the best response card in the response slot."""
 	var state := game_controller.get_game_state()
@@ -2554,6 +2763,14 @@ func _score_response_card_for_slot(card_name: String, card_data: Dictionary, sta
 					# Character is dead - card is useless
 					score = -10.0
 				break
+
+	# Card-level chance condition: reduce final score by the failure probability
+	# (e.g., Critical Strike has 50% chance — halve the expected value)
+	var card_condition: Dictionary = card_data.get("condition", {})
+	if card_condition.has("chance"):
+		var card_chance: float = float(card_condition.get("chance", 1.0))
+		if card_chance < 1.0 and card_chance > 0.0:
+			score *= card_chance
 
 	return score
 

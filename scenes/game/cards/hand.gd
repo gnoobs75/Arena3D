@@ -36,13 +36,23 @@ var multi_selected_cards: Array[String] = []
 func _ready() -> void:
 	# Set up anchors for bottom positioning
 	set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	offset_top = -200  # Height of the hand area
-	offset_left = 240   # After left side panel (220 + margin)
-	offset_right = -240  # Before right side panel
+	offset_top = -LayoutManager.HAND_H
+	offset_left = LayoutManager.MARGIN
+	offset_right = -LayoutManager.MARGIN
 	offset_bottom = 0
 
 	_create_ui()
 	_is_ready = true
+
+
+func update_layout(new_layout: LayoutManager) -> void:
+	"""Update positioning from LayoutManager."""
+	anchor_left = 0
+	anchor_top = 0
+	anchor_right = 0
+	anchor_bottom = 0
+	position = new_layout.hand_rect.position
+	size = new_layout.hand_rect.size
 
 
 func _create_ui() -> void:
@@ -138,6 +148,13 @@ func setup(player: int) -> void:
 
 var _previous_hand_size: int = 0
 
+var _game_state: GameState = null
+
+func set_game_state(state: GameState) -> void:
+	"""Set game state reference for cost reduction checks."""
+	_game_state = state
+
+
 func update_hand(hand: Array, mana: int, valid_responses: Array[String] = [], restricted_cards: Array[String] = []) -> void:
 	"""Update displayed cards from hand array.
 	valid_responses: If non-empty, these response cards are playable (response window is open).
@@ -162,7 +179,7 @@ func update_hand(hand: Array, mana: int, valid_responses: Array[String] = [], re
 			continue
 
 		var card_data := CardDatabase.get_card(card_name)
-		var cost: int = card_data.get("cost", 0)
+		var cost: int = _game_state.get_effective_cost(card_name) if _game_state else card_data.get("cost", 0)
 		var card_type: String = str(card_data.get("type", ""))
 
 		if card_type == "Response":
@@ -195,10 +212,13 @@ func update_hand(hand: Array, mana: int, valid_responses: Array[String] = [], re
 		tween.tween_property(card_visual, "modulate:a", 1.0, 0.2).set_ease(Tween.EASE_OUT)
 		tween.parallel().tween_property(card_visual, "scale", Vector2.ONE, 0.25).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
 
-		# Newly drawn card gets a golden flash highlight
+		# Newly drawn card gets a stronger golden flash highlight
 		if is_new_card:
-			tween.tween_property(card_visual, "modulate", Color(1.3, 1.2, 0.8), 0.15)
-			tween.tween_property(card_visual, "modulate", Color.WHITE, 0.3)
+			card_visual.scale = Vector2(1.15, 1.15)
+			tween.tween_property(card_visual, "modulate", Color(1.5, 1.3, 0.7), 0.12)
+			tween.parallel().tween_property(card_visual, "scale", Vector2(1.08, 1.08), 0.1).set_ease(Tween.EASE_OUT)
+			tween.tween_property(card_visual, "modulate", Color.WHITE, 0.35)
+			tween.parallel().tween_property(card_visual, "scale", Vector2.ONE, 0.2).set_ease(Tween.EASE_IN_OUT)
 
 
 func update_discard(discard: Array) -> void:
@@ -219,6 +239,13 @@ func _clear_cards() -> void:
 func _create_card_visual(card_name: String, is_playable: bool, index: int) -> CardVisual:
 	"""Create a card visual instance."""
 	var card: CardVisual = CARD_SCENE.instantiate()
+	# Set cost override for cards with conditional cost reduction
+	if _game_state:
+		var card_data := CardDatabase.get_card(card_name)
+		var base_cost: int = card_data.get("cost", 0)
+		var effective: int = _game_state.get_effective_cost(card_name)
+		if effective != base_cost:
+			card.cost_override = effective
 	card.setup(card_name, is_playable)
 	card.card_clicked.connect(_on_card_clicked)
 	card.card_hovered.connect(_on_card_hovered)
@@ -249,12 +276,13 @@ func _on_card_clicked(card_name: String) -> void:
 			card_selected.emit(card_name)
 
 
-func _on_card_hovered(card_name: String) -> void:
-	"""Show large preview when hovering over a card."""
-	if preview_container == null or card_preview == null:
-		return
+var _hovered_card_visual: CardVisual = null
+const CARD_PEEK_LIFT := 50.0  # How far cards lift on hover
 
-	# Find the hovered card visual to position the preview
+
+func _on_card_hovered(card_name: String) -> void:
+	"""Show large preview and lift card when hovering."""
+	# Find the hovered card visual
 	var hovered_card: CardVisual = null
 	for index: int in card_visuals:
 		var card: CardVisual = card_visuals[index]
@@ -265,7 +293,18 @@ func _on_card_hovered(card_name: String) -> void:
 	if hovered_card == null:
 		return
 
-	# Setup the preview card
+	# Lift the card up (peek effect)
+	if _hovered_card_visual != hovered_card:
+		_unhover_current_card()
+		_hovered_card_visual = hovered_card
+		var tween := hovered_card.create_tween()
+		tween.tween_property(hovered_card, "position:y", hovered_card.position.y - CARD_PEEK_LIFT, 0.12).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+		hovered_card.z_index = 10
+
+	# Show large preview
+	if preview_container == null or card_preview == null:
+		return
+
 	card_preview.setup(card_name, true, false)
 
 	# Position preview above the hovered card, centered horizontally
@@ -277,7 +316,7 @@ func _on_card_hovered(card_name: String) -> void:
 	# Convert to local position relative to this control
 	var local_pos := Vector2.ZERO
 	local_pos.x = card_center_x - global_position.x - preview_width / 2
-	local_pos.y = -preview_height - 20  # Above the hand with some padding
+	local_pos.y = -preview_height - CARD_PEEK_LIFT - 20  # Above the lifted card
 
 	# Clamp horizontal position to keep preview on screen
 	var screen_width := get_viewport_rect().size.x
@@ -291,8 +330,19 @@ func _on_card_hovered(card_name: String) -> void:
 	preview_container.visible = true
 
 
+func _unhover_current_card() -> void:
+	"""Lower the previously hovered card back to its original position."""
+	if _hovered_card_visual and is_instance_valid(_hovered_card_visual):
+		var card := _hovered_card_visual
+		card.z_index = 0
+		var tween := card.create_tween()
+		tween.tween_property(card, "position:y", 0.0, 0.1).set_ease(Tween.EASE_IN)
+		_hovered_card_visual = null
+
+
 func _on_card_unhovered(_card_name: String) -> void:
-	"""Hide preview when not hovering."""
+	"""Hide preview and lower card when not hovering."""
+	_unhover_current_card()
 	if preview_container:
 		preview_container.visible = false
 
@@ -348,7 +398,7 @@ func get_multi_selected_cards() -> Array[String]:
 
 
 func play_card_fly_animation(card_name: String) -> void:
-	"""Animate a card flying upward from hand when played."""
+	"""Animate a card flying upward from hand when played, with type-specific trail colors."""
 	# Find the card visual in the hand
 	var source_card: CardVisual = null
 	for index: int in card_visuals:
@@ -359,6 +409,18 @@ func play_card_fly_animation(card_name: String) -> void:
 
 	if source_card == null:
 		return
+
+	# Get card type for trail color
+	var card_data := CardDatabase.get_card(card_name)
+	var card_type: String = str(card_data.get("type", "Action"))
+	var trail_color: Color
+	match card_type:
+		"Response":
+			trail_color = VisualTheme.TRAIL_RESPONSE
+		"Equipment":
+			trail_color = VisualTheme.TRAIL_EQUIPMENT
+		_:
+			trail_color = VisualTheme.TRAIL_ACTION
 
 	# Create a temporary clone card for the animation
 	var fly_card: CardVisual = CARD_SCENE.instantiate()
@@ -385,6 +447,26 @@ func play_card_fly_animation(card_name: String) -> void:
 		get_viewport_rect().size.x / 2 - fly_card.size.x / 2,
 		get_viewport_rect().size.y / 2 - fly_card.size.y
 	)
+
+	# Spawn trail ghosts behind the flying card (type-colored)
+	var parent_node := fly_card.get_parent()
+	for ghost_i in range(3):
+		var ghost := ColorRect.new()
+		var ghost_col := trail_color
+		ghost_col.a = trail_color.a - float(ghost_i) * 0.04
+		ghost.color = ghost_col
+		ghost.size = fly_card.size
+		ghost.global_position = start_pos
+		ghost.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		ghost.z_index = 49 - ghost_i
+		ghost.pivot_offset = fly_card.size / 2
+		parent_node.add_child(ghost)
+		var ghost_delay := 0.04 + float(ghost_i) * 0.04
+		var ghost_tween := ghost.create_tween()
+		ghost_tween.set_parallel(true)
+		ghost_tween.tween_property(ghost, "global_position", target_pos, 0.35 + ghost_delay).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC).set_delay(ghost_delay)
+		ghost_tween.tween_property(ghost, "modulate:a", 0.0, 0.25).set_delay(ghost_delay + 0.05)
+		ghost_tween.chain().tween_callback(ghost.queue_free)
 
 	var tween := fly_card.create_tween()
 	tween.set_parallel(true)

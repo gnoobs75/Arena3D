@@ -332,3 +332,163 @@ static func get_hp_gradient_colors(pct: float) -> Array:
 		return [GRADIENT_HP_MEDIUM_TOP, GRADIENT_HP_MEDIUM_BOTTOM]
 	else:
 		return [GRADIENT_HP_LOW_TOP, GRADIENT_HP_LOW_BOTTOM]
+
+
+# =============================================================
+# === VISUAL POLISH CONSTANTS =================================
+# =============================================================
+
+# === STONE TILE SETTINGS ===
+const TILE_DEPTH_EMPTY := 6        # Pixel depth for raised stone slabs
+const TILE_DEPTH_WALL := 10        # Pixel depth for tall wall blocks
+const TILE_STONE_LIGHT := Color(0.32, 0.34, 0.36)   # Light stone checkerboard
+const TILE_STONE_DARK := Color(0.24, 0.26, 0.28)    # Dark stone checkerboard
+const TILE_STONE_GRAIN := Color(1.0, 1.0, 1.0, 0.04) # Stone grain overlay
+const TILE_SPECULAR := Color(1.0, 1.0, 1.0, 0.12)   # Specular highlight top-left
+const TILE_AO_GAP := Color(0, 0, 0, 0.25)            # Ambient occlusion in gaps
+const TILE_WALL_TOP := Color(0.18, 0.19, 0.22)       # Wall top face
+const TILE_WALL_MORTAR := Color(0.1, 0.1, 0.12, 0.6) # Mortar lines
+const TILE_WALL_SIDE := Color(0.1, 0.1, 0.13)        # Wall side face (depth)
+const TILE_PIT_VOID := Color(0.02, 0.01, 0.04)       # Pit void center
+const TILE_PIT_RIM := Color(0.15, 0.12, 0.18)        # Crumbling pit rim
+const TILE_PIT_GLOW := Color(0.5, 0.2, 0.7, 0.35)   # Purple glow from pit
+const TILE_LIGHTING_BRIGHT := 0.08  # Brightness boost for top-left tiles
+const TILE_LIGHTING_DIM := -0.06    # Darkness for bottom-right tiles
+
+# === BOARD FRAME ===
+const FRAME_WOOD := Color(0.12, 0.09, 0.06)          # Dark wood gradient base
+const FRAME_WOOD_LIGHT := Color(0.18, 0.14, 0.1)     # Wood gradient top
+const FRAME_GOLD_TRIM := Color(0.75, 0.6, 0.2)       # Gold trim line
+const FRAME_GOLD_DIM := Color(0.5, 0.4, 0.15)        # Dim gold for inner trim
+const FRAME_DIAMOND := Color(0.65, 0.5, 0.18)        # Corner diamond ornaments
+
+# === VFX PARTICLE COLORS ===
+const VFX_DUST := Color(0.55, 0.45, 0.3, 0.6)       # Movement dust trail
+const VFX_SPARK := Color(1.0, 0.9, 0.5, 0.9)        # Melee impact sparks
+const VFX_MAGIC := Color(0.4, 0.5, 1.0, 0.8)        # Magic swirl default
+const VFX_CAST := Color(1.0, 1.0, 0.7, 0.7)         # Cast shimmer sparkles
+const VFX_DEATH_RING := Color(0.15, 0.05, 0.2, 0.8)  # Death dark ring
+const VFX_DEATH_SOUL := Color(0.6, 0.8, 1.0, 0.5)   # Death soul wisps
+const VFX_HEAL := Color(0.3, 1.0, 0.4, 0.7)         # Heal sparkles
+const VFX_HEAL_GOLD := Color(1.0, 0.9, 0.4, 0.6)    # Heal golden sparkles
+const VFX_AMBIENT := Color(1.0, 1.0, 1.0, 0.08)     # Ambient dust motes
+const VFX_PIT_SMOKE := Color(0.4, 0.15, 0.6, 0.3)   # Purple pit wisps
+const VFX_RANGED := Color(0.9, 0.7, 0.3, 0.8)       # Ranged trail dots
+const VFX_MAX_PARTICLES := 200                        # Global particle cap
+
+# === ENHANCED COMBAT TEXT ===
+const COMBAT_FONT_DAMAGE := 28     # Bigger damage numbers
+const COMBAT_FONT_CRIT := 36       # Critical hit font size
+const COMBAT_FONT_HEAL := 24       # Heal number size
+const COMBAT_IMPACT_SCALE := 1.8   # Impact pop scale
+const COMBAT_SHAKE_THRESHOLD := 3  # Damage amount to trigger shake
+const COMBAT_FLASH_THRESHOLD := 5  # Damage amount for red flash
+
+# === ENHANCED CARD HOVER ===
+const CARD_HOVER_LIFT := 30        # Pixels to lift on hover
+const CARD_HOVER_SCALE := 1.05     # Scale on hover
+const CARD_HOVER_TILT := 2.0       # Degrees of tilt on hover
+const CARD_GLOW_LAYERS := 4        # Layers for golden hover glow
+const CARD_PLAYABLE_PULSE_MIN := 0.15  # Min alpha for playable pulse
+const CARD_PLAYABLE_PULSE_MAX := 0.35  # Max alpha for playable pulse
+
+# === HP BAR ENHANCED ===
+const HP_BAR_HEIGHT_ENHANCED := 22  # Taller HP bars
+const HP_TICK_INTERVAL := 5         # HP tick mark every N points
+const HP_DANGER_THRESHOLD := 0.2    # HP % for danger pulse
+
+# === TURN BANNER ===
+const TURN_BANNER_FONT := 36       # Dramatic turn banner size
+const TURN_BANNER_HEIGHT := 80     # Banner height in pixels
+
+# === RESPONSE SLOT PULSE ===
+const RESPONSE_PULSE_COLOR := Color(0.9, 0.5, 0.1, 0.6)  # Orange pulse
+const RESPONSE_PULSE_SPEED := 3.0   # Pulse speed when active
+
+# === VIGNETTE ===
+const VIGNETTE_COLOR := Color(0, 0, 0, 0.4)  # Dark edge vignette
+const VIGNETTE_INNER_RADIUS := 0.35  # Where vignette starts (0-1)
+
+# === SCREEN FLASH ===
+const FLASH_ACTION := Color(1.0, 1.0, 0.8, 0.25)   # Action card flash
+const FLASH_RESPONSE := Color(0.3, 0.6, 1.0, 0.2)  # Response card flash (cool blue)
+const FLASH_EQUIPMENT := Color(0.8, 0.8, 0.9, 0.18) # Equipment card flash (silver)
+const FLASH_DAMAGE := Color(1.0, 0.2, 0.1, 0.2)    # Heavy damage flash
+const FLASH_HEAL := Color(0.2, 1.0, 0.4, 0.15)     # Heal flash
+
+# === CARD CAST VFX (Type-Specific) ===
+# Energy beam: champion-colored arc from caster to target (Action cards)
+const ENERGY_BEAM_WIDTH := 3.0            # Base beam width
+const ENERGY_BEAM_SEGMENTS := 10          # Segments for sine wobble
+const ENERGY_BEAM_WOBBLE := 8.0           # Amplitude of wobble
+const ENERGY_BEAM_SPEED := 12.0           # Wobble frequency
+const ENERGY_BEAM_LIFETIME := 0.45        # How long beam persists
+const ENERGY_BEAM_GLOW := Color(1.0, 1.0, 1.0, 0.3) # Core glow overlay
+
+# Cast burst: radial particle explosion (Action cards)
+const VFX_CAST_BURST_COUNT := 18          # Particles in burst
+const VFX_CAST_BURST_SPEED := 80.0        # Outward speed
+const VFX_CAST_BURST_LIFETIME := 0.5      # Particle duration
+
+# Shield flash: expanding protective ring (Response cards)
+const VFX_SHIELD_COLOR := Color(0.3, 0.6, 1.0, 0.7)  # Blue shield
+const VFX_SHIELD_EXPAND_SPEED := 60.0      # Ring expansion rate
+const VFX_SHIELD_LIFETIME := 0.35          # Quick flash
+
+# Equipment glow: metallic sparkle attach (Equipment cards)
+const VFX_EQUIP_COLOR := Color(0.85, 0.85, 0.95, 0.8) # Silver metallic
+const VFX_EQUIP_GOLD := Color(1.0, 0.9, 0.5, 0.7)     # Gold accent
+const VFX_EQUIP_LIFETIME := 0.6            # Attach duration
+
+# Card fly trail colors per type
+const TRAIL_ACTION := Color(1.0, 0.95, 0.6, 0.15)    # Gold trails
+const TRAIL_RESPONSE := Color(0.4, 0.6, 1.0, 0.12)   # Blue trails
+const TRAIL_EQUIPMENT := Color(0.8, 0.8, 0.9, 0.12)   # Silver trails
+
+# === ARENA CROWD ===
+const CROWD_SILHOUETTE := Color(0.06, 0.05, 0.08)     # Dark crowd body
+const CROWD_SILHOUETTE_LIGHT := Color(0.1, 0.08, 0.12) # Lighter crowd variant
+const CROWD_HEAD_SIZE := 5.0                # Head circle radius
+const CROWD_BODY_WIDTH := 9.0              # Shoulder width
+const CROWD_BODY_HEIGHT := 12.0            # Body height below head
+const CROWD_ROWS := 6                       # Depth rows of spectators (colosseum)
+const CROWD_PER_SIDE := 18                  # Spectators per side per row
+const CROWD_SWAY_SPEED := 1.2              # Idle sway frequency
+const CROWD_SWAY_AMOUNT := 1.8             # Idle sway pixels
+const CROWD_REACT_INTENSITY := 6.0         # Reaction movement pixels
+const CROWD_REACT_DURATION := 1.0          # Reaction animation length
+const CROWD_SHOUT_CHANCE := 0.4            # Chance to show speech bubble on reaction
+
+# Torch/brazier settings
+const TORCH_COLOR := Color(1.0, 0.7, 0.2, 0.5)       # Warm fire glow
+const TORCH_FLICKER_SPEED := 4.0            # Flicker frequency
+const TORCH_RADIUS := 16.0                  # Glow radius
+const TORCH_POSITIONS := 4                   # Corner braziers
+
+# === SOUND PATHS ===
+const SFX_HIT := ["res://assets/sounds/hit.mp3", "res://assets/sounds/hit1.mp3", "res://assets/sounds/hit2.mp3"]
+const SFX_MAGIC := ["res://assets/sounds/magic.mp3", "res://assets/sounds/magic1.mp3", "res://assets/sounds/magic2.mp3"]
+const SFX_SPELL_CAST := "res://assets/sounds/spellcast-46164.mp3"
+const SFX_MAGIC_IMPACT := "res://assets/sounds/elemental-magic-spell-impact-outgoing-228342 (1).mp3"
+const SFX_DEATH := "res://assets/sounds/death.mp3"
+const SFX_PAIN := "res://assets/sounds/male-grunting-in-pain-45746.mp3"
+const SFX_HEAL := "res://assets/sounds/magic-ascend-3-259526.mp3"
+const SFX_VICTORY := "res://assets/sounds/yay.mp3"
+const MUSIC_BATTLE := "res://assets/sounds/the-ballad-of-blades-audio-logo-253770.mp3"
+const MUSIC_AMBIENT := "res://assets/sounds/relaxing-guitar-loop-v5-245859.mp3"
+
+# === HELPER: Tile lighting modifier ===
+static func get_tile_lighting(x: int, y: int, board_size: int = 10) -> float:
+	"""Get per-tile brightness modifier. Top-left brighter, bottom-right darker."""
+	var nx := float(x) / float(board_size - 1)  # 0..1
+	var ny := float(y) / float(board_size - 1)
+	var t := (nx + ny) / 2.0  # 0 = top-left, 1 = bottom-right
+	return lerpf(TILE_LIGHTING_BRIGHT, TILE_LIGHTING_DIM, t)
+
+
+static func apply_lighting(color: Color, lighting: float) -> Color:
+	"""Apply lighting modifier to a color."""
+	if lighting > 0:
+		return color.lerp(Color.WHITE, lighting)
+	else:
+		return color.lerp(Color.BLACK, -lighting)

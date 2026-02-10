@@ -247,7 +247,7 @@ func _on_debuff_applied(champion_id: String, debuff_name: String, duration: int)
 		{"champion_id": champion_id, "debuff": debuff_name, "duration": duration})
 
 
-func _on_card_played(player_id: int, card_id: String, targets: Array) -> void:
+func _on_card_played(player_id: int, card_id: String, targets: Array, _caster_id: String = "") -> void:
 	var player_name := "Player 1" if player_id == 1 else "Player 2 (AI)"
 	var card_data := CardDatabase.get_card(card_id)
 	var card_name: String = card_data.get("name", card_id) if not card_data.is_empty() else card_id

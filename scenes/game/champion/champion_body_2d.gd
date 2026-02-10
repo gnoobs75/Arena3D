@@ -34,6 +34,7 @@ var _weapon: Node2D
 var _left_weapon: Node2D
 var _shadow: Node2D
 var _effects: Node2D  # Glow, halo, etc.
+var _status_overlay: Node2D  # Dynamic status effect visuals
 
 # UI elements
 var _hp_bar: Control
@@ -350,6 +351,11 @@ func _build_body() -> void:
 		var spirit := _ShadowSpiritDrawer.new()
 		_effects.add_child(spirit)
 
+	# Status effect overlay (dynamic - updated when buffs/debuffs change)
+	_status_overlay = Node2D.new()
+	_status_overlay.name = "StatusOverlay"
+	_body_container.add_child(_status_overlay)
+
 	# HP bar at bottom
 	_hp_bar = _HPBarDrawer.new()
 	_hp_bar.name = "HPBar"
@@ -378,6 +384,73 @@ func _update_hp_bar() -> void:
 		(_hp_bar as _HPBarDrawer).set_hp(current_hp, max_hp, owner_id)
 
 
+func update_status_effects(champ: ChampionState) -> void:
+	"""Update visual overlays based on active buffs/debuffs."""
+	if _status_overlay == null:
+		return
+
+	# Clear existing overlays
+	for child in _status_overlay.get_children():
+		child.queue_free()
+
+	if champ == null or not champ.is_alive():
+		return
+
+	# Hypnotized / Statue effect - gray stone tint, freeze animation
+	if champ.has_debuff("hypnotized"):
+		var stone := _StatusStoneDrawer.new()
+		stone.body_height = TOKEN_SIZE * 0.8
+		_status_overlay.add_child(stone)
+		# Gray out the body
+		if _body_container:
+			_body_container.modulate = Color(0.5, 0.5, 0.55, 1.0)
+		return  # Stone overrides other visuals
+
+	# Blinded effect - dark swirl over head area
+	if champ.has_debuff("blinded"):
+		var blind := _StatusBlindedDrawer.new()
+		blind.position = Vector2(0, -TOKEN_SIZE * 0.35)
+		_status_overlay.add_child(blind)
+
+	# Can't move - chains at feet
+	if champ.has_debuff("canMove"):
+		var chains := _StatusChainDrawer.new()
+		chains.position = Vector2(0, TOKEN_SIZE * 0.25)
+		_status_overlay.add_child(chains)
+
+	# Can't attack - red X over weapon area
+	if champ.has_debuff("canAttack"):
+		var no_atk := _StatusNoAttackDrawer.new()
+		no_atk.position = Vector2(TOKEN_SIZE * 0.2, -TOKEN_SIZE * 0.05)
+		_status_overlay.add_child(no_atk)
+
+	# Can't cast - purple seal
+	if champ.has_debuff("canCast"):
+		var no_cast := _StatusNoCastDrawer.new()
+		no_cast.position = Vector2(-TOKEN_SIZE * 0.2, -TOKEN_SIZE * 0.1)
+		_status_overlay.add_child(no_cast)
+
+	# Immune / Vortex Shield - golden bubble
+	if champ.has_buff("immune") or champ.has_buff("vortexShield"):
+		var shield := _StatusShieldDrawer.new()
+		shield.body_height = TOKEN_SIZE * 0.7
+		_status_overlay.add_child(shield)
+
+	# Stealthed - faded/transparent with smoke tint
+	if champ.has_buff("stealth"):
+		if _body_container:
+			_body_container.modulate = Color(0.7, 0.7, 0.8, 0.35)
+		return
+
+	# Power locked - dark red aura
+	if champ.has_debuff("powerLocked"):
+		var locked := _StatusPowerLockedDrawer.new()
+		_status_overlay.add_child(locked)
+
+	# Restore team tint if not overridden
+	_apply_team_tint()
+
+
 func set_selected(selected: bool) -> void:
 	is_selected = selected
 	if _selection_indicator:
@@ -402,7 +475,7 @@ func _process(delta: float) -> void:
 
 
 func _update_idle() -> void:
-	"""Procedural idle animation - breathing, sway."""
+	"""Procedural idle animation - breathing, sway, champion-specific personality."""
 	if _body_container == null or appearance == null:
 		return
 	if _current_anim != AnimState.IDLE:
@@ -413,17 +486,21 @@ func _update_idle() -> void:
 
 	# Breathing - torso slight scale
 	if _torso:
-		_torso.scale.y = 1.0 + sin(t * 2.5) * 0.015 * intensity
+		_torso.scale.y = 1.0 + sin(t * 2.5) * 0.018 * intensity
 
 	# Subtle body sway
 	if _body_container and not appearance.is_floating:
-		_body_container.rotation = sin(t * 1.2) * 0.012 * intensity
+		_body_container.rotation = sin(t * 1.2) * 0.015 * intensity
 
-	# Head bob
+	# Head bob - different per champion personality
 	if _head:
-		_head.position.y += sin(t * 2.5) * 0.08 * intensity - sin((t - 0.01) * 2.5) * 0.08 * intensity
+		var head_delta := sin(t * 2.5) * 0.1 * intensity - sin((t - 0.01) * 2.5) * 0.1 * intensity
+		_head.position.y += head_delta
+		# Head look-around for alert champions
+		if champion_name in ["Burglar", "Ranger", "Beast"]:
+			_head.rotation = sin(t * 0.8) * 0.08 * intensity
 
-	# Arm sway
+	# Arm sway - base behavior
 	if _left_arm_joint:
 		_left_arm_joint.rotation = sin(t * 1.5) * 0.06 * intensity
 	if _right_arm_joint:
@@ -431,7 +508,118 @@ func _update_idle() -> void:
 
 	# Floating bob for floating champions
 	if appearance.is_floating and _body_container:
-		_body_container.position.y = -appearance.float_height + sin(t * 1.8) * 2.0
+		_body_container.position.y = -appearance.float_height + sin(t * 1.8) * 2.5
+		# Subtle rotation drift for floaters
+		if _body_container:
+			_body_container.rotation = sin(t * 0.7) * 0.02
+
+	# Champion-specific idle personality
+	_update_champion_idle(t, intensity)
+
+
+func _update_champion_idle(t: float, intensity: float) -> void:
+	"""Champion-specific idle personality quirks."""
+	match champion_name:
+		"Brute":
+			# Periodic fist clench / flex - every ~4 seconds
+			var flex_cycle := fmod(t, 4.0)
+			if flex_cycle < 0.6 and _right_arm_joint:
+				var flex_t := flex_cycle / 0.6
+				_right_arm_joint.rotation = sin(flex_t * PI) * -0.35 * intensity
+			# Jaw clench / head tilt
+			if _head and fmod(t + 1.5, 5.0) < 0.3:
+				_head.rotation = sin(fmod(t + 1.5, 5.0) / 0.3 * PI) * 0.06
+
+		"Barbarian":
+			# Restless weight shifting - shoulders roll
+			if _torso:
+				_torso.rotation = sin(t * 0.9) * 0.03 * intensity
+			# Periodic weapon check (arm lifts)
+			if _right_arm_joint and fmod(t, 6.0) < 0.8:
+				var check_t := fmod(t, 6.0) / 0.8
+				_right_arm_joint.rotation = sin(check_t * PI) * -0.25
+
+		"Berserker":
+			# Agitated twitching - fast micro-movements
+			if _body_container:
+				_body_container.position.x += sin(t * 8.0) * 0.15 * intensity - sin((t - 0.01) * 8.0) * 0.15 * intensity
+			# Occasional head snap
+			if _head and fmod(t, 3.0) < 0.15:
+				_head.rotation = sin(fmod(t, 3.0) / 0.15 * PI) * 0.12
+
+		"Alchemist":
+			# Looking at flask in hand, mixing motion
+			if _left_arm_joint and fmod(t, 5.0) < 1.5:
+				var mix_t := fmod(t, 5.0) / 1.5
+				_left_arm_joint.rotation = -0.2 + sin(mix_t * PI * 3) * 0.15
+			# Head tilt examining something
+			if _head:
+				_head.rotation = sin(t * 0.6) * 0.05
+
+		"Redeemer":
+			# Gentle prayer pose - hands together periodically
+			if fmod(t, 7.0) < 2.0:
+				var pray_t := fmod(t, 7.0) / 2.0
+				var pray_angle := sin(pray_t * PI) * -0.2
+				if _left_arm_joint:
+					_left_arm_joint.rotation = pray_angle
+				if _right_arm_joint:
+					_right_arm_joint.rotation = pray_angle
+			# Subtle upward gaze
+			if _head:
+				_head.position.y -= sin(t * 0.4) * 0.3 * intensity
+
+		"DarkWizard":
+			# Eerie slow drift, occasional arm raise
+			if _body_container:
+				_body_container.rotation = sin(t * 0.5) * 0.025
+			if _right_arm_joint and fmod(t, 8.0) < 1.5:
+				var raise_t := fmod(t, 8.0) / 1.5
+				_right_arm_joint.rotation = sin(raise_t * PI) * -0.4
+
+		"Burglar":
+			# Nervous shifting, looking around rapidly
+			if _head:
+				var look_cycle := fmod(t * 2.0, 4.0)
+				if look_cycle < 0.5:
+					_head.rotation = look_cycle / 0.5 * 0.15
+				elif look_cycle < 1.5:
+					_head.rotation = 0.15
+				elif look_cycle < 2.0:
+					_head.rotation = 0.15 - (look_cycle - 1.5) / 0.5 * 0.3
+				elif look_cycle < 3.0:
+					_head.rotation = -0.15
+				else:
+					_head.rotation = -0.15 + (look_cycle - 3.0) / 1.0 * 0.15
+			# Slight crouch bob
+			if _body_container:
+				_body_container.position.y += sin(t * 2.0) * 0.3 * intensity
+
+		"Illusionist":
+			# Playful sway, exaggerated movements
+			if _body_container:
+				_body_container.rotation = sin(t * 1.0) * 0.025 * intensity
+			# Staff twirl (right arm circles)
+			if _right_arm_joint:
+				_right_arm_joint.rotation = sin(t * 1.3) * 0.12 * intensity
+
+		"Shaman":
+			# Meditative breathing, deeper than normal
+			if _torso:
+				_torso.scale.y = 1.0 + sin(t * 1.5) * 0.03 * intensity
+			# Subtle levitation attempt
+			if _body_container and fmod(t, 6.0) < 1.0:
+				var rise_t := fmod(t, 6.0) / 1.0
+				_body_container.position.y -= sin(rise_t * PI) * 1.5
+
+		"Confessor":
+			# Graceful sway like dancing in place
+			if _body_container:
+				_body_container.rotation = sin(t * 0.8) * 0.03
+			if _left_arm_joint:
+				_left_arm_joint.rotation = sin(t * 0.7) * 0.1
+			if _right_arm_joint:
+				_right_arm_joint.rotation = sin(t * 0.7 + PI * 0.5) * 0.1
 
 
 func _flash_damage() -> void:
@@ -449,8 +637,15 @@ func play_walk_animation(direction: Vector2) -> void:
 	_kill_anim_tween()
 	_anim_tween = create_tween()
 
-	var dur := 0.35
+	# Heavier champions walk slower with bigger steps
+	var weight := 1.0
+	if appearance:
+		weight = appearance.body_scale
+	var dur := 0.3 + weight * 0.08
 	var step_count := 3
+	var leg_swing := 25.0 + weight * 5.0
+	var arm_swing := 20.0 + weight * 3.0
+	var bob_height := 1.5 + weight * 1.0
 
 	# Face direction
 	if direction.x < -0.1 and _body_container:
@@ -459,20 +654,30 @@ func play_walk_animation(direction: Vector2) -> void:
 		_body_container.scale.x = 1.0
 
 	for i in range(step_count):
-		var t := float(i) / step_count
-		# Leg swing
-		_anim_tween.tween_property(_left_leg, "rotation", deg_to_rad(25), dur / step_count / 2)
-		_anim_tween.parallel().tween_property(_right_leg, "rotation", deg_to_rad(-25), dur / step_count / 2)
-		_anim_tween.parallel().tween_property(_left_arm_joint, "rotation", deg_to_rad(-20), dur / step_count / 2)
-		_anim_tween.parallel().tween_property(_right_arm_joint, "rotation", deg_to_rad(20), dur / step_count / 2)
-		# Body bob
-		_anim_tween.parallel().tween_property(_body_container, "position:y", _body_container.position.y - 2, dur / step_count / 2)
+		var step_dur := dur / step_count / 2
+		# Step 1 - left foot forward
+		_anim_tween.tween_property(_left_leg, "rotation", deg_to_rad(leg_swing), step_dur)
+		_anim_tween.parallel().tween_property(_right_leg, "rotation", deg_to_rad(-leg_swing), step_dur)
+		_anim_tween.parallel().tween_property(_left_arm_joint, "rotation", deg_to_rad(-arm_swing), step_dur)
+		_anim_tween.parallel().tween_property(_right_arm_joint, "rotation", deg_to_rad(arm_swing), step_dur)
+		_anim_tween.parallel().tween_property(_body_container, "position:y", _body_container.position.y - bob_height, step_dur)
+		# Torso lean into movement
+		if _torso:
+			_anim_tween.parallel().tween_property(_torso, "rotation", deg_to_rad(3), step_dur)
+		# Head stays level (counter-rotation)
+		if _head:
+			_anim_tween.parallel().tween_property(_head, "rotation", deg_to_rad(-2), step_dur)
 
-		_anim_tween.tween_property(_left_leg, "rotation", deg_to_rad(-25), dur / step_count / 2)
-		_anim_tween.parallel().tween_property(_right_leg, "rotation", deg_to_rad(25), dur / step_count / 2)
-		_anim_tween.parallel().tween_property(_left_arm_joint, "rotation", deg_to_rad(20), dur / step_count / 2)
-		_anim_tween.parallel().tween_property(_right_arm_joint, "rotation", deg_to_rad(-20), dur / step_count / 2)
-		_anim_tween.parallel().tween_property(_body_container, "position:y", _body_container.position.y, dur / step_count / 2)
+		# Step 2 - right foot forward
+		_anim_tween.tween_property(_left_leg, "rotation", deg_to_rad(-leg_swing), step_dur)
+		_anim_tween.parallel().tween_property(_right_leg, "rotation", deg_to_rad(leg_swing), step_dur)
+		_anim_tween.parallel().tween_property(_left_arm_joint, "rotation", deg_to_rad(arm_swing), step_dur)
+		_anim_tween.parallel().tween_property(_right_arm_joint, "rotation", deg_to_rad(-arm_swing), step_dur)
+		_anim_tween.parallel().tween_property(_body_container, "position:y", _body_container.position.y, step_dur)
+		if _torso:
+			_anim_tween.parallel().tween_property(_torso, "rotation", deg_to_rad(-3), step_dur)
+		if _head:
+			_anim_tween.parallel().tween_property(_head, "rotation", deg_to_rad(2), step_dur)
 
 	# Return to neutral
 	_anim_tween.tween_property(_left_leg, "rotation", 0.0, 0.1)
@@ -480,6 +685,10 @@ func play_walk_animation(direction: Vector2) -> void:
 	_anim_tween.parallel().tween_property(_left_arm_joint, "rotation", 0.0, 0.1)
 	_anim_tween.parallel().tween_property(_right_arm_joint, "rotation", 0.0, 0.1)
 	_anim_tween.parallel().tween_property(_body_container, "scale:x", 1.0, 0.1)
+	if _torso:
+		_anim_tween.parallel().tween_property(_torso, "rotation", 0.0, 0.1)
+	if _head:
+		_anim_tween.parallel().tween_property(_head, "rotation", 0.0, 0.1)
 
 	_anim_tween.tween_callback(func():
 		_current_anim = AnimState.IDLE
@@ -696,16 +905,46 @@ func play_hit_animation() -> void:
 	_kill_anim_tween()
 	_anim_tween = create_tween()
 
-	# Flash red
-	_anim_tween.tween_property(_body_container, "modulate", Color(1.5, 0.3, 0.3), 0.04)
-	# Recoil
-	_anim_tween.parallel().tween_property(_body_container, "position:x", _body_container.position.x - 3, 0.04)
-	_anim_tween.tween_property(_body_container, "position:x", _body_container.position.x + 3, 0.04)
-	_anim_tween.tween_property(_body_container, "position:x", _body_container.position.x - 2, 0.04)
-	_anim_tween.tween_property(_body_container, "position:x", _body_container.position.x, 0.04)
-	# Head snap back
-	_anim_tween.parallel().tween_property(_head, "rotation", deg_to_rad(-15), 0.06)
-	_anim_tween.tween_property(_head, "rotation", 0.0, 0.1)
+	var recoil := 4.0
+	var is_heavy := appearance and appearance.body_scale >= 1.1
+
+	# Flash red + white
+	_anim_tween.tween_property(_body_container, "modulate", Color(2.0, 0.5, 0.3), 0.03)
+
+	if is_heavy:
+		# Heavy champions barely flinch - just a slight stagger
+		_anim_tween.parallel().tween_property(_body_container, "position:x", _body_container.position.x - 2, 0.04)
+		_anim_tween.tween_property(_body_container, "position:x", _body_container.position.x, 0.08)
+		# Flinch head slightly
+		if _head:
+			_anim_tween.parallel().tween_property(_head, "rotation", deg_to_rad(-8), 0.06)
+	else:
+		# Lighter champions get knocked around more
+		_anim_tween.parallel().tween_property(_body_container, "position:x", _body_container.position.x - recoil, 0.04)
+		_anim_tween.tween_property(_body_container, "position:x", _body_container.position.x + recoil * 0.6, 0.04)
+		_anim_tween.tween_property(_body_container, "position:x", _body_container.position.x - recoil * 0.3, 0.04)
+		_anim_tween.tween_property(_body_container, "position:x", _body_container.position.x, 0.04)
+		# Head snap back
+		if _head:
+			_anim_tween.parallel().tween_property(_head, "rotation", deg_to_rad(-18), 0.05)
+		# Slight crouch from impact
+		_anim_tween.parallel().tween_property(_body_container, "position:y", _body_container.position.y + 2, 0.06)
+		_anim_tween.tween_property(_body_container, "position:y", _body_container.position.y, 0.1)
+
+	# Head return
+	if _head:
+		_anim_tween.tween_property(_head, "rotation", 0.0, 0.1)
+	# Arms flinch
+	if _left_arm_joint:
+		_anim_tween.parallel().tween_property(_left_arm_joint, "rotation", deg_to_rad(-15), 0.05)
+	if _right_arm_joint:
+		_anim_tween.parallel().tween_property(_right_arm_joint, "rotation", deg_to_rad(-15), 0.05)
+	# Arms recover
+	if _left_arm_joint:
+		_anim_tween.tween_property(_left_arm_joint, "rotation", 0.0, 0.12)
+	if _right_arm_joint:
+		_anim_tween.parallel().tween_property(_right_arm_joint, "rotation", 0.0, 0.12)
+
 	# Restore color
 	_anim_tween.tween_callback(_apply_team_tint)
 	_anim_tween.tween_callback(func():
@@ -767,22 +1006,62 @@ func play_death_animation() -> void:
 
 	_anim_tween = create_tween()
 
-	# Stagger
-	_anim_tween.tween_property(_body_container, "position:x", _body_container.position.x - 2, 0.1)
-	# Collapse legs
-	_anim_tween.tween_property(_left_leg, "rotation", deg_to_rad(45), 0.2)
-	_anim_tween.parallel().tween_property(_right_leg, "rotation", deg_to_rad(-45), 0.2)
-	# Fall
-	_anim_tween.parallel().tween_property(_body_container, "rotation", deg_to_rad(85), 0.35).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_BACK)
-	_anim_tween.parallel().tween_property(_body_container, "position:y", _body_container.position.y + 8, 0.35)
-	# Arms go limp
-	_anim_tween.parallel().tween_property(_left_arm_joint, "rotation", deg_to_rad(60), 0.25)
-	_anim_tween.parallel().tween_property(_right_arm_joint, "rotation", deg_to_rad(60), 0.25)
-	# Fade
-	_anim_tween.tween_property(self, "modulate:a", 0.0, 0.4).set_delay(0.1)
-	# HP bar and shadow
-	_anim_tween.parallel().tween_property(_hp_bar, "modulate:a", 0.0, 0.2)
-	_anim_tween.parallel().tween_property(_shadow, "modulate:a", 0.0, 0.2)
+	var is_heavy := appearance and appearance.body_scale >= 1.1
+	var is_magic := appearance and appearance.attack_style == "magic"
+
+	# Phase 1: Final hit reaction - dramatic stagger
+	_anim_tween.tween_property(_body_container, "modulate", Color(2.0, 0.3, 0.2), 0.05)
+	_anim_tween.parallel().tween_property(_body_container, "position:x", _body_container.position.x - 3, 0.08)
+	_anim_tween.tween_property(_body_container, "modulate", Color.WHITE, 0.08)
+
+	if is_magic and appearance.is_floating:
+		# Magical champions: dissolve upward
+		_anim_tween.tween_property(_body_container, "position:y", _body_container.position.y - 12, 0.4).set_trans(Tween.TRANS_QUAD)
+		_anim_tween.parallel().tween_property(_body_container, "scale", Vector2(0.3, 1.5), 0.4)
+		_anim_tween.parallel().tween_property(self, "modulate:a", 0.0, 0.4)
+	elif is_heavy:
+		# Heavy champions: dramatic earth-shaking fall forward
+		# Stagger step
+		_anim_tween.tween_property(_body_container, "position:x", _body_container.position.x + 2, 0.12)
+		# Knees buckle
+		_anim_tween.tween_property(_left_leg, "rotation", deg_to_rad(55), 0.2)
+		_anim_tween.parallel().tween_property(_right_leg, "rotation", deg_to_rad(-35), 0.2)
+		_anim_tween.parallel().tween_property(_body_container, "position:y", _body_container.position.y + 4, 0.2)
+		# Pause on knees
+		_anim_tween.tween_interval(0.15)
+		# Face-plant forward
+		_anim_tween.tween_property(_body_container, "rotation", deg_to_rad(90), 0.25).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
+		_anim_tween.parallel().tween_property(_body_container, "position:y", _body_container.position.y + 10, 0.25)
+		# Arms slam down
+		_anim_tween.parallel().tween_property(_left_arm_joint, "rotation", deg_to_rad(80), 0.2)
+		_anim_tween.parallel().tween_property(_right_arm_joint, "rotation", deg_to_rad(80), 0.2)
+		# Impact bounce
+		_anim_tween.tween_property(_body_container, "position:y", _body_container.position.y + 8, 0.06)
+		_anim_tween.tween_property(_body_container, "position:y", _body_container.position.y + 10, 0.06)
+		# Fade
+		_anim_tween.tween_property(self, "modulate:a", 0.0, 0.5).set_delay(0.2)
+	else:
+		# Standard champions: stagger back and fall
+		# Head drops
+		if _head:
+			_anim_tween.tween_property(_head, "rotation", deg_to_rad(20), 0.15)
+		# Legs give out
+		_anim_tween.tween_property(_left_leg, "rotation", deg_to_rad(45), 0.2)
+		_anim_tween.parallel().tween_property(_right_leg, "rotation", deg_to_rad(-45), 0.2)
+		# Fall backward
+		_anim_tween.parallel().tween_property(_body_container, "rotation", deg_to_rad(85), 0.35).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_BACK)
+		_anim_tween.parallel().tween_property(_body_container, "position:y", _body_container.position.y + 8, 0.35)
+		# Arms go limp
+		_anim_tween.parallel().tween_property(_left_arm_joint, "rotation", deg_to_rad(60), 0.25)
+		_anim_tween.parallel().tween_property(_right_arm_joint, "rotation", deg_to_rad(60), 0.25)
+		# Fade
+		_anim_tween.tween_property(self, "modulate:a", 0.0, 0.4).set_delay(0.1)
+
+	# HP bar and shadow always fade
+	if _hp_bar:
+		_anim_tween.parallel().tween_property(_hp_bar, "modulate:a", 0.0, 0.2)
+	if _shadow:
+		_anim_tween.parallel().tween_property(_shadow, "modulate:a", 0.0, 0.2)
 	_anim_tween.tween_callback(func(): animation_finished.emit("death"))
 
 
@@ -790,9 +1069,23 @@ func play_heal_animation() -> void:
 	if _anim_tween and _anim_tween.is_valid():
 		return
 	var tween := create_tween()
-	tween.tween_property(_body_container, "modulate", Color(0.5, 1.5, 0.5), 0.15)
-	tween.parallel().tween_property(_body_container, "position:y", _body_container.position.y - 3, 0.15)
-	tween.tween_property(_body_container, "position:y", _body_container.position.y, 0.2)
+	# Green glow pulse
+	tween.tween_property(_body_container, "modulate", Color(0.4, 1.6, 0.4), 0.12)
+	# Rise up slightly
+	tween.parallel().tween_property(_body_container, "position:y", _body_container.position.y - 4, 0.12)
+	# Arms spread slightly (receiving energy)
+	if _left_arm_joint:
+		tween.parallel().tween_property(_left_arm_joint, "rotation", deg_to_rad(-20), 0.12)
+	if _right_arm_joint:
+		tween.parallel().tween_property(_right_arm_joint, "rotation", deg_to_rad(-20), 0.12)
+	# Second pulse brighter
+	tween.tween_property(_body_container, "modulate", Color(0.6, 1.8, 0.6), 0.08)
+	# Settle back
+	tween.tween_property(_body_container, "position:y", _body_container.position.y, 0.2).set_trans(Tween.TRANS_BOUNCE)
+	if _left_arm_joint:
+		tween.parallel().tween_property(_left_arm_joint, "rotation", 0.0, 0.15)
+	if _right_arm_joint:
+		tween.parallel().tween_property(_right_arm_joint, "rotation", 0.0, 0.15)
 	tween.parallel().tween_callback(_apply_team_tint)
 	tween.tween_callback(func(): animation_finished.emit("heal"))
 
@@ -801,9 +1094,22 @@ func play_buff_animation() -> void:
 	if _anim_tween and _anim_tween.is_valid():
 		return
 	var tween := create_tween()
-	tween.tween_property(_body_container, "modulate", Color(0.5, 1.3, 1.5), 0.12)
-	tween.parallel().tween_property(_body_container, "scale", Vector2(1.08, 1.08), 0.12)
+	# Power surge - expand, glow cyan/gold
+	tween.tween_property(_body_container, "modulate", Color(0.5, 1.4, 1.6), 0.1)
+	tween.parallel().tween_property(_body_container, "scale", Vector2(1.1, 1.1), 0.1)
+	# Arms flex outward
+	if _left_arm_joint:
+		tween.parallel().tween_property(_left_arm_joint, "rotation", deg_to_rad(-25), 0.1)
+	if _right_arm_joint:
+		tween.parallel().tween_property(_right_arm_joint, "rotation", deg_to_rad(-25), 0.1)
+	# Flash bright
+	tween.tween_property(_body_container, "modulate", Color(0.8, 1.6, 1.8), 0.04)
+	# Settle
 	tween.tween_property(_body_container, "scale", Vector2(1.0, 1.0), 0.15)
+	if _left_arm_joint:
+		tween.parallel().tween_property(_left_arm_joint, "rotation", 0.0, 0.12)
+	if _right_arm_joint:
+		tween.parallel().tween_property(_right_arm_joint, "rotation", 0.0, 0.12)
 	tween.parallel().tween_callback(_apply_team_tint)
 	tween.tween_callback(func(): animation_finished.emit("buff"))
 
@@ -812,9 +1118,22 @@ func play_debuff_animation() -> void:
 	if _anim_tween and _anim_tween.is_valid():
 		return
 	var tween := create_tween()
-	tween.tween_property(_body_container, "modulate", Color(1.3, 0.5, 1.3), 0.12)
-	tween.parallel().tween_property(_body_container, "scale", Vector2(0.93, 0.93), 0.12)
+	# Weaken - shrink, glow sickly purple
+	tween.tween_property(_body_container, "modulate", Color(1.4, 0.4, 1.4), 0.08)
+	tween.parallel().tween_property(_body_container, "scale", Vector2(0.92, 0.92), 0.1)
+	# Stagger / hunch
+	tween.parallel().tween_property(_body_container, "position:y", _body_container.position.y + 2, 0.1)
+	if _head:
+		tween.parallel().tween_property(_head, "rotation", deg_to_rad(8), 0.1)
+	# Shudder
+	tween.tween_property(_body_container, "position:x", _body_container.position.x + 1.5, 0.03)
+	tween.tween_property(_body_container, "position:x", _body_container.position.x - 1.5, 0.03)
+	tween.tween_property(_body_container, "position:x", _body_container.position.x, 0.03)
+	# Recover
 	tween.tween_property(_body_container, "scale", Vector2(1.0, 1.0), 0.15)
+	tween.parallel().tween_property(_body_container, "position:y", _body_container.position.y, 0.15)
+	if _head:
+		tween.parallel().tween_property(_head, "rotation", 0.0, 0.12)
 	tween.parallel().tween_callback(_apply_team_tint)
 	tween.tween_callback(func(): animation_finished.emit("debuff"))
 
@@ -1866,3 +2185,174 @@ class _HPBarDrawer extends Control:
 		# HP text
 		var font := ThemeDB.fallback_font
 		draw_string(font, Vector2(bar_width / 2 - 4, bar_y + 5), str(_current_hp), HORIZONTAL_ALIGNMENT_CENTER, -1, 8, Color.WHITE)
+
+
+# === STATUS EFFECT DRAWERS ===
+
+class _StatusStoneDrawer extends Node2D:
+	"""Hypnotized/Statue - gray stone overlay with cracks."""
+	var body_height: float = 40.0
+	var _time: float = 0.0
+
+	func _process(delta: float) -> void:
+		_time += delta
+		queue_redraw()
+
+	func _draw() -> void:
+		# Stone texture overlay (semi-transparent gray)
+		var stone_col := Color(0.45, 0.43, 0.48, 0.4)
+		var half_h := body_height / 2.0
+		draw_circle(Vector2.ZERO, body_height * 0.5, stone_col)
+
+		# Crack lines (deterministic pattern)
+		var crack_col := Color(0.3, 0.28, 0.32, 0.6)
+		draw_line(Vector2(-6, -half_h * 0.5), Vector2(2, half_h * 0.2), crack_col, 1.0)
+		draw_line(Vector2(2, half_h * 0.2), Vector2(-3, half_h * 0.6), crack_col, 1.0)
+		draw_line(Vector2(4, -half_h * 0.3), Vector2(8, half_h * 0.1), crack_col, 1.0)
+
+		# Slow stone dust particles
+		for i in range(3):
+			var phase := float(i) * 2.1 + _time * 0.3
+			var px := sin(phase * 1.3) * body_height * 0.3
+			var py := -half_h + fmod(phase, 3.0) / 3.0 * body_height
+			var alpha := 0.3 + sin(_time * 0.5 + float(i)) * 0.15
+			draw_circle(Vector2(px, py), 1.5, Color(0.6, 0.58, 0.62, alpha))
+
+
+class _StatusBlindedDrawer extends Node2D:
+	"""Blinded - dark X over eyes with swirl."""
+	var _time: float = 0.0
+
+	func _process(delta: float) -> void:
+		_time += delta
+		queue_redraw()
+
+	func _draw() -> void:
+		# Pulsing dark cloud over eye area
+		var pulse := 0.6 + sin(_time * 2.5) * 0.2
+		var dark := Color(0.15, 0.1, 0.2, 0.5 * pulse)
+		draw_circle(Vector2.ZERO, 8.0, dark)
+
+		# X mark over eyes
+		var x_col := Color(0.9, 0.2, 0.2, 0.7 * pulse)
+		draw_line(Vector2(-4, -4), Vector2(4, 4), x_col, 1.5)
+		draw_line(Vector2(4, -4), Vector2(-4, 4), x_col, 1.5)
+
+		# Drifting dark motes
+		for i in range(2):
+			var phase := float(i) * 3.7 + _time * 0.8
+			var px := sin(phase) * 6.0
+			var py := cos(phase * 0.7) * 4.0
+			draw_circle(Vector2(px, py), 1.5, Color(0.1, 0.05, 0.15, 0.3))
+
+
+class _StatusChainDrawer extends Node2D:
+	"""Can't Move - chain links at feet."""
+	var _time: float = 0.0
+
+	func _process(delta: float) -> void:
+		_time += delta
+		queue_redraw()
+
+	func _draw() -> void:
+		var chain_col := Color(0.5, 0.45, 0.35, 0.7)
+		var rattle := sin(_time * 4.0) * 1.5
+
+		# Chain links (small ovals)
+		for i in range(5):
+			var x := float(i - 2) * 6.0 + rattle * (0.5 if i % 2 == 0 else -0.5)
+			var link_rect := Rect2(x - 2, -2, 4, 4)
+			draw_rect(link_rect, chain_col, false, 1.2)
+
+		# Center lock
+		draw_circle(Vector2(0, 0), 3.0, Color(0.6, 0.5, 0.3, 0.8))
+		draw_circle(Vector2(0, 0), 1.5, Color(0.3, 0.25, 0.15, 0.6))
+
+
+class _StatusNoAttackDrawer extends Node2D:
+	"""Can't Attack - broken sword / red X."""
+	var _time: float = 0.0
+
+	func _process(delta: float) -> void:
+		_time += delta
+		queue_redraw()
+
+	func _draw() -> void:
+		var pulse := 0.7 + sin(_time * 2.0) * 0.2
+		var sword_col := Color(0.7, 0.65, 0.6, 0.6 * pulse)
+		# Broken sword
+		draw_line(Vector2(-3, 5), Vector2(0, -2), sword_col, 1.5)
+		draw_line(Vector2(2, -6), Vector2(4, -10), sword_col, 1.5)
+		# Red prohibition circle
+		var red := Color(0.9, 0.15, 0.15, 0.5 * pulse)
+		draw_arc(Vector2(0, -2), 6.0, 0, TAU, 16, red, 1.3)
+		draw_line(Vector2(-4, -6), Vector2(4, 2), red, 1.3)
+
+
+class _StatusNoCastDrawer extends Node2D:
+	"""Can't Cast - purple seal."""
+	var _time: float = 0.0
+
+	func _process(delta: float) -> void:
+		_time += delta
+		queue_redraw()
+
+	func _draw() -> void:
+		var pulse := 0.6 + sin(_time * 1.8) * 0.25
+		var seal_col := Color(0.6, 0.2, 0.8, 0.4 * pulse)
+
+		# Rotating seal circle
+		var rot := _time * 0.5
+		draw_arc(Vector2.ZERO, 7.0, rot, rot + TAU, 16, seal_col, 1.2)
+
+		# Inner rune marks
+		for i in range(3):
+			var angle := rot + float(i) * TAU / 3.0
+			var p := Vector2(cos(angle), sin(angle)) * 4.0
+			draw_circle(p, 1.5, Color(0.7, 0.3, 0.9, 0.5 * pulse))
+
+
+class _StatusShieldDrawer extends Node2D:
+	"""Immune / Vortex Shield - golden protective bubble."""
+	var body_height: float = 35.0
+	var _time: float = 0.0
+
+	func _process(delta: float) -> void:
+		_time += delta
+		queue_redraw()
+
+	func _draw() -> void:
+		var pulse := 0.7 + sin(_time * 2.0) * 0.15
+		var radius := body_height * 0.55
+
+		# Outer golden glow
+		var outer := Color(1.0, 0.85, 0.3, 0.12 * pulse)
+		draw_circle(Vector2.ZERO, radius + 4, outer)
+
+		# Shield bubble
+		var shield_col := Color(1.0, 0.9, 0.4, 0.18 * pulse)
+		draw_arc(Vector2.ZERO, radius, 0, TAU, 24, shield_col, 2.0)
+
+		# Shimmer highlights
+		for i in range(4):
+			var angle := _time * 0.8 + float(i) * TAU / 4.0
+			var p := Vector2(cos(angle), sin(angle)) * radius * 0.85
+			var shimmer := Color(1.0, 1.0, 0.7, 0.3 * pulse * (0.5 + sin(_time * 3.0 + float(i)) * 0.5))
+			draw_circle(p, 2.0, shimmer)
+
+
+class _StatusPowerLockedDrawer extends Node2D:
+	"""Power Locked - dark red suppression aura."""
+	var _time: float = 0.0
+
+	func _process(delta: float) -> void:
+		_time += delta
+		queue_redraw()
+
+	func _draw() -> void:
+		var pulse := 0.5 + sin(_time * 2.5) * 0.2
+		# Dark red suppression rings
+		for i in range(2):
+			var r := 12.0 + float(i) * 6.0
+			var col := Color(0.6, 0.1, 0.1, 0.2 * pulse * (1.0 - float(i) * 0.3))
+			draw_arc(Vector2.ZERO, r, 0, TAU, 16, col, 1.5)
