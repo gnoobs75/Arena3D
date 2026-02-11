@@ -72,6 +72,14 @@ var _current_turn_player: int = 1
 var combat_log_panel: CombatLogPanel
 var combat_log_button: Button
 
+# Champion inspector popup
+var _champion_inspector: Control = null
+var _inspector_visible: bool = false
+
+# Portrait hover signals
+signal portrait_hovered(champion_id: String)
+signal portrait_unhovered()
+
 var game_state: GameState
 var _is_ready: bool = false
 var _selected_champion_id: String = ""
@@ -150,6 +158,11 @@ func _create_ui() -> void:
 	combat_log_button.pressed.connect(_on_combat_log_button_pressed)
 	_style_button(combat_log_button, Color(0.3, 0.35, 0.4))
 	add_child(combat_log_button)
+
+	# === Champion Inspector (hidden by default) ===
+	_champion_inspector = _create_champion_inspector()
+	_champion_inspector.visible = false
+	add_child(_champion_inspector)
 
 
 var _dev_wrappers: Array[DraggableWrapper] = []
@@ -1166,6 +1179,179 @@ func _on_combat_log_button_pressed() -> void:
 		combat_log_panel.toggle()
 		# Update button text to show state
 		combat_log_button.text = "Log [X]" if combat_log_panel.visible else "Log"
+
+
+func _create_champion_inspector() -> Control:
+	"""Create the champion hover inspector popup panel."""
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(200, 250)
+	panel.z_index = 50
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.08, 0.08, 0.12, 0.92)
+	style.border_color = Color(0.4, 0.35, 0.5)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(8)
+	style.set_content_margin_all(10)
+	style.shadow_color = Color(0, 0, 0, 0.5)
+	style.shadow_size = 6
+	panel.add_theme_stylebox_override("panel", style)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 4)
+	vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(vbox)
+
+	# Name label
+	var name_label := Label.new()
+	name_label.name = "NameLabel"
+	name_label.add_theme_font_size_override("font_size", 16)
+	name_label.add_theme_color_override("font_color", Color(1, 0.9, 0.6))
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(name_label)
+
+	# Class label
+	var class_label := Label.new()
+	class_label.name = "ClassLabel"
+	class_label.add_theme_font_size_override("font_size", 12)
+	class_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.75))
+	class_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(class_label)
+
+	# Separator
+	var sep := HSeparator.new()
+	sep.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(sep)
+
+	# HP bar
+	var hp_label := Label.new()
+	hp_label.name = "HPLabel"
+	hp_label.add_theme_font_size_override("font_size", 13)
+	hp_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(hp_label)
+
+	# Stats
+	var stats_label := Label.new()
+	stats_label.name = "StatsLabel"
+	stats_label.add_theme_font_size_override("font_size", 12)
+	stats_label.add_theme_color_override("font_color", Color(0.8, 0.8, 0.85))
+	stats_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(stats_label)
+
+	# Buffs
+	var buffs_label := Label.new()
+	buffs_label.name = "BuffsLabel"
+	buffs_label.add_theme_font_size_override("font_size", 11)
+	buffs_label.add_theme_color_override("font_color", Color(0.4, 0.9, 0.4))
+	buffs_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(buffs_label)
+
+	# Debuffs
+	var debuffs_label := Label.new()
+	debuffs_label.name = "DebuffsLabel"
+	debuffs_label.add_theme_font_size_override("font_size", 11)
+	debuffs_label.add_theme_color_override("font_color", Color(0.9, 0.4, 0.4))
+	debuffs_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(debuffs_label)
+
+	# Equipment
+	var equip_label := Label.new()
+	equip_label.name = "EquipLabel"
+	equip_label.add_theme_font_size_override("font_size", 11)
+	equip_label.add_theme_color_override("font_color", Color(0.7, 0.8, 0.6))
+	equip_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(equip_label)
+
+	return panel
+
+
+func show_champion_inspector(champ, screen_pos: Vector2) -> void:
+	"""Show inspector popup for a champion at the given screen position."""
+	if _champion_inspector == null or champ == null:
+		return
+
+	var vbox := _champion_inspector.get_child(0)
+	var name_label: Label = vbox.get_node("NameLabel")
+	var class_label: Label = vbox.get_node("ClassLabel")
+	var hp_label: Label = vbox.get_node("HPLabel")
+	var stats_label: Label = vbox.get_node("StatsLabel")
+	var buffs_label: Label = vbox.get_node("BuffsLabel")
+	var debuffs_label: Label = vbox.get_node("DebuffsLabel")
+	var equip_label: Label = vbox.get_node("EquipLabel")
+
+	name_label.text = champ.champion_name
+	class_label.text = "Player %d" % champ.owner_id
+	hp_label.text = "HP: %d / %d" % [champ.current_hp, champ.max_hp]
+	if champ.current_hp <= champ.max_hp * 0.3:
+		hp_label.add_theme_color_override("font_color", Color(1.0, 0.3, 0.3))
+	else:
+		hp_label.add_theme_color_override("font_color", Color(0.4, 0.9, 0.4))
+
+	# Stats with buff/debuff coloring
+	var pw: int = int(champ.current_power)
+	var rg: int = int(champ.current_range)
+	var mv: int = int(champ.current_movement)
+	var pw_col := "+" if pw > champ.base_power else ("-" if pw < champ.base_power else "")
+	var rg_col := "+" if rg > champ.base_range else ("-" if rg < champ.base_range else "")
+	stats_label.text = "Power: %d%s  Range: %d%s  Move: %d" % [pw, pw_col, rg, rg_col, mv]
+
+	# Buffs
+	var buff_text := ""
+	if champ.has_method("get_active_buffs"):
+		var buffs: Dictionary = champ.get_active_buffs()
+		for buff_name: String in buffs:
+			if buff_text != "":
+				buff_text += ", "
+			buff_text += buff_name
+	buffs_label.text = buff_text if buff_text != "" else ""
+	buffs_label.visible = buff_text != ""
+
+	# Debuffs
+	var debuff_text := ""
+	if champ.has_method("get_active_debuffs"):
+		var debuffs: Dictionary = champ.get_active_debuffs()
+		for debuff_name: String in debuffs:
+			if debuff_text != "":
+				debuff_text += ", "
+			debuff_text += debuff_name
+	debuffs_label.text = debuff_text if debuff_text != "" else ""
+	debuffs_label.visible = debuff_text != ""
+
+	# Equipment
+	var equip_text := ""
+	if champ.has_method("get_equipment"):
+		var equips: Array = champ.get_equipment()
+		for eq in equips:
+			if equip_text != "":
+				equip_text += "\n"
+			var charges: int = eq.get("charges", 0)
+			equip_text += "%s (%d)" % [str(eq.get("name", "")), charges]
+	equip_label.text = equip_text if equip_text != "" else ""
+	equip_label.visible = equip_text != ""
+
+	# Position near the champion, offset so it doesn't overlap
+	var vp_size := get_viewport().get_visible_rect().size
+	var panel_w := 200.0
+	var panel_h := 260.0
+	var pos_x := screen_pos.x + 40.0
+	var pos_y := screen_pos.y - panel_h / 2
+
+	# Keep on screen
+	if pos_x + panel_w > vp_size.x - 10:
+		pos_x = screen_pos.x - panel_w - 40.0
+	pos_y = clampf(pos_y, 10.0, vp_size.y - panel_h - 10.0)
+
+	_champion_inspector.position = Vector2(pos_x, pos_y)
+	_champion_inspector.visible = true
+	_inspector_visible = true
+
+
+func hide_champion_inspector() -> void:
+	"""Hide the champion inspector popup."""
+	if _champion_inspector:
+		_champion_inspector.visible = false
+		_inspector_visible = false
 
 
 # === Inner Classes ===

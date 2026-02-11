@@ -24,6 +24,16 @@ var _global_react_type: String = ""
 var _wave_timer: float = -1.0
 var _wave_side: int = 0
 
+# Tension system
+var _tension: float = 0.0  # 0.0 to 1.0
+
+# Combo tracking
+var _combo_count: int = 0
+var _combo_turn: int = -1
+
+# Torch flare state
+var _torch_flare: float = 0.0  # Extra brightness 0.0 to 1.0, decays over time
+
 # Spectator pose types
 enum Pose { SITTING, STANDING, CHEERING, BEER_HOLD, FIST_PUMP, LEAN_FORWARD, CLAPPING }
 
@@ -98,6 +108,26 @@ const SHOUTS_CHEER := [
 	"YEAH!", "LET'S GO!", "WOOO!", "MORE! MORE!",
 	"This is AMAZING!", "Best fight ever!",
 	"ENCORE!", "Worth every coin!",
+]
+
+const CHAMPION_CHANTS := {
+	"Brute": ["BRUTE! BRUTE!", "SMASH 'EM!", "Green machine!"],
+	"Ranger": ["Take the shot!", "BULLSEYE!", "One shot!"],
+	"Beast": ["UNLEASH!", "Wild thing!", "Let it loose!"],
+	"Redeemer": ["LIGHT!", "Heal up!", "The chosen one!"],
+	"Confessor": ["Confess!", "Dark sermon!", "Repent!"],
+	"Barbarian": ["CHARGE!", "Blood and glory!", "Rage on!"],
+	"Burglar": ["Now you see him...", "Sneaky!", "Pick 'em clean!"],
+	"Berserker": ["MADNESS!", "Blood! Blood!", "No mercy!"],
+	"Shaman": ["Thunder!", "Shock 'em!", "Storm's coming!"],
+	"Illusionist": ["Magic!", "Trickster!", "Now you don't!"],
+	"DarkWizard": ["Shadow!", "Darkness rises!", "Feed the void!"],
+	"Alchemist": ["BOMBS AWAY!", "Mix it up!", "Mad genius!"],
+}
+
+const SHOUTS_COMBO := [
+	"COMBO!", "Keep it going!", "He can't stop!",
+	"UNSTOPPABLE!", "Chain attack!", "RAMPAGE!",
 ]
 
 const SHOUTS_BEER := [
@@ -343,6 +373,13 @@ func _process(delta: float) -> void:
 		else:
 			idx += 1
 
+	# Tension decay
+	_tension = maxf(_tension - 0.02 * delta, 0.0)
+
+	# Torch flare decay (fast - 0.5s total)
+	if _torch_flare > 0.0:
+		_torch_flare = maxf(_torch_flare - delta * 2.0, 0.0)
+
 	_check_idle_shout(delta)
 	queue_redraw()
 
@@ -396,6 +433,8 @@ func _draw_torches() -> void:
 		var flicker := 0.7 + sin(_time * VisualTheme.TORCH_FLICKER_SPEED + phase) * 0.15
 		flicker += sin(_time * VisualTheme.TORCH_FLICKER_SPEED * 2.3 + phase * 1.7) * 0.1
 		flicker += sin(_time * VisualTheme.TORCH_FLICKER_SPEED * 0.7 + phase * 3.1) * 0.05
+		# Torch flare boost from exciting events
+		flicker += _torch_flare * 0.4
 
 		# Wide warm glow
 		var glow := VisualTheme.TORCH_COLOR
@@ -887,6 +926,35 @@ func _spawn_shout(shouts: Array, intensity: float = 1.0) -> void:
 		_speech_bubbles.remove_at(0)
 
 
+func _spawn_speech_bubble(text: String) -> void:
+	"""Spawn a speech bubble from a random front-row spectator."""
+	if _spectators.is_empty():
+		return
+	var candidates: Array[int] = []
+	for i in range(_spectators.size()):
+		if int(_spectators[i]["row"]) < 2:
+			candidates.append(i)
+	if candidates.is_empty():
+		return
+	var spec_idx := candidates[int(absf(sin(_time * 13.7)) * candidates.size()) % candidates.size()]
+	var spec := _spectators[spec_idx]
+	var bx := float(spec["x"])
+	var by := float(spec["y"])
+	var side := int(spec["side"])
+	match side:
+		0: by -= 25
+		1: by += 30
+		2: bx -= 25
+		3: bx += 25
+	var duration := 2.0 + sin(_time * 3.1) * 0.5
+	_speech_bubbles.append({
+		"x": bx, "y": by, "text": text,
+		"timer": duration, "duration": duration,
+	})
+	while _speech_bubbles.size() > 5:
+		_speech_bubbles.remove_at(0)
+
+
 func _spawn_vendor_shout(vendor: Dictionary) -> void:
 	var text: String = SHOUTS_BEER[randi() % SHOUTS_BEER.size()]
 	var vx := float(vendor["x"])
@@ -944,9 +1012,17 @@ func _trigger_reaction(reaction_type: String, intensity: float = 1.0) -> void:
 
 
 func _on_champion_attacked(_attacker_id: String, _target_id: String, damage: int) -> void:
+	_tension = minf(_tension + 0.1, 1.0)
+	_combo_count += 1
+
 	if damage >= 6:
 		_trigger_reaction("cheer", 1.0)
 		_spawn_shout(SHOUTS_BIG_HIT, 1.5)
+		trigger_torch_flare(0.8)
+	elif damage >= 5:
+		_trigger_reaction("gasp", 1.0)
+		_spawn_shout(SHOUTS_BIG_HIT, 1.0)
+		trigger_torch_flare(0.6)
 	elif damage >= 4:
 		_trigger_reaction("gasp", 1.0)
 		_spawn_shout(SHOUTS_BIG_HIT, 1.0)
@@ -958,28 +1034,66 @@ func _on_champion_attacked(_attacker_id: String, _target_id: String, damage: int
 	else:
 		_trigger_reaction("stir", 0.3)
 
+	# Combo reactions
+	if _combo_count >= 5:
+		_trigger_reaction("cheer", 1.0)
+		_spawn_shout(SHOUTS_COMBO, 1.5)
+	elif _combo_count >= 3:
+		_spawn_shout(SHOUTS_COMBO, 0.8)
+
 
 func _on_champion_died(_champion_id: String, _killer_id: String) -> void:
+	_tension = minf(_tension + 0.3, 1.0)
 	_trigger_reaction("cheer", 1.0)
 	_spawn_shout(SHOUTS_KILL, 2.0)
+	trigger_torch_flare(1.0)
 
 
 func _on_champion_healed(_champion_id: String, amount: int, _source: String) -> void:
 	if amount >= 3:
 		_trigger_reaction("stir", 0.4)
 		_spawn_shout(SHOUTS_HEAL, 0.6)
+		_tension = minf(_tension + 0.05, 1.0)
 
 
 func _on_card_played(_player_id: int, _card_id: String, _targets: Array, _caster_id: String = "") -> void:
+	# Get card data for champion-specific chants
+	var card_data: Dictionary = {}
+	if CardDatabase:
+		card_data = CardDatabase.get_card(_card_id) if CardDatabase.has_method("get_card") else {}
+	var champion: String = str(card_data.get("character", ""))
+
 	_trigger_reaction("stir", 0.3)
-	_spawn_shout(SHOUTS_SPELL, 0.3)
+
+	# 25% chance of champion-specific chant
+	var chant_roll := sin(_time * 17.3 + float(_player_id) * 5.1)
+	if chant_roll > 0.5 and CHAMPION_CHANTS.has(champion):
+		var chants: Array = CHAMPION_CHANTS[champion]
+		var idx := int(absf(sin(_time * 7.1)) * chants.size()) % chants.size()
+		_spawn_speech_bubble(chants[idx])
+	else:
+		_spawn_shout(SHOUTS_SPELL, 0.3)
+
+	_tension = minf(_tension + 0.05, 1.0)
 
 
 func _on_game_started(_p1_champs: Array, _p2_champs: Array) -> void:
 	_trigger_reaction("cheer", 0.8)
 	_spawn_shout(SHOUTS_CHEER, 1.5)
+	_tension = 0.3
 
 
 func _on_game_ended(_winner: int, _reason: String) -> void:
 	_trigger_reaction("cheer", 1.0)
 	_spawn_shout(SHOUTS_CHEER, 2.0)
+	_tension = 1.0
+
+
+func reset_combo() -> void:
+	"""Reset combo counter. Call on turn change."""
+	_combo_count = 0
+
+
+func trigger_torch_flare(intensity: float = 1.0) -> void:
+	"""Boost torch brightness temporarily. Decays over ~0.5s."""
+	_torch_flare = clampf(intensity, 0.0, 1.0)

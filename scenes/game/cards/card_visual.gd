@@ -21,6 +21,7 @@ var is_playable: bool = true
 var is_hovered: bool = false
 var is_face_down: bool = false
 var is_selected: bool = false  # For multi-select mode
+var is_cost_locked: bool = false  # Blocked by maxCastCost debuff (Guess Again)
 var cost_override: int = -1  # -1 = use base cost, >= 0 = use this cost (for ifDrawnStart etc.)
 var original_position: Vector2 = Vector2.ZERO
 var character_texture: Texture2D = null
@@ -327,6 +328,17 @@ func _draw_card_front() -> void:
 		cost_color = Color(0.5, 0.5, 0.5)
 	VisualTheme.draw_text_shadow(self, font, cost_text_pos, cost_str, VisualTheme.FONT_CARD_COST, cost_color)
 
+	# === COST LOCKED OVERLAY (Red X over mana cost) ===
+	if is_cost_locked:
+		var x_size := cost_size / 2 - 2
+		var x_color := Color(1.0, 0.15, 0.1, 0.95)
+		var x_width := 3.5
+		# Draw X lines
+		draw_line(cost_center + Vector2(-x_size, -x_size), cost_center + Vector2(x_size, x_size), x_color, x_width)
+		draw_line(cost_center + Vector2(x_size, -x_size), cost_center + Vector2(-x_size, x_size), x_color, x_width)
+		# Red ring around cost
+		draw_arc(cost_center, cost_size / 2 + 1, 0, TAU, 32, Color(1.0, 0.1, 0.05, 0.8), 2.5)
+
 	# === NAME OVERLAY (Top Middle) ===
 	var name_margin := VisualTheme.PADDING_CARD
 	var name_height := 24.0
@@ -408,11 +420,61 @@ func _draw_card_front() -> void:
 		draw_rect(Rect2(0, 0, w, h), Color(1, 1, 0.7, 0.18))
 		draw_rect(Rect2(0, 0, w, h), Color(1, 0.95, 0.5, 1.0), false, 2.5)
 	elif is_playable and not is_hovered and not is_selected and not is_face_down:
-		# Stronger breathing border pulse on playable cards
+		# Type-specific glow colors
+		var glow_color: Color
+		match card_type:
+			"Action":
+				glow_color = Color(1.0, 0.85, 0.3)   # Warm gold
+			"Response":
+				glow_color = Color(0.3, 0.6, 1.0)     # Cool blue
+			"Equipment":
+				glow_color = Color(0.75, 0.8, 0.85)   # Silver
+			_:
+				glow_color = Color(0.7, 0.85, 1.0)
+
+		# Breathing border pulse
 		var pulse := (sin(_playable_glow_time) + 1.0) * 0.5  # 0 to 1
 		var glow_alpha := VisualTheme.CARD_PLAYABLE_PULSE_MIN + pulse * (VisualTheme.CARD_PLAYABLE_PULSE_MAX - VisualTheme.CARD_PLAYABLE_PULSE_MIN)
-		draw_rect(Rect2(-1, -1, w + 2, h + 2), Color(0.7, 0.85, 1.0, glow_alpha * 0.5), false, 2.0)
-		draw_rect(Rect2(0, 0, w, h), Color(0.8, 0.9, 1.0, glow_alpha), false, 1.5)
+		draw_rect(Rect2(-1, -1, w + 2, h + 2), Color(glow_color.r, glow_color.g, glow_color.b, glow_alpha * 0.5), false, 2.0)
+		draw_rect(Rect2(0, 0, w, h), Color(glow_color.r, glow_color.g, glow_color.b, glow_alpha), false, 1.5)
+
+		# Rising sparkle particles along card border
+		_draw_playable_sparkles(w, h, glow_color)
+
+
+func _draw_playable_sparkles(w: float, h: float, glow_color: Color) -> void:
+	"""Draw faint rising sparkle dots along card border when playable."""
+	for i in range(6):
+		# Each sparkle cycles along a different edge position
+		var phase := _playable_glow_time * 1.5 + float(i) * 1.05
+		var cycle := fmod(phase, 3.0) / 3.0  # 0.0 to 1.0 cycling
+		var rise := fmod(phase * 0.8, 1.0)  # Vertical rise amount
+
+		# Position along card perimeter
+		var px: float
+		var py: float
+		var edge := int(float(i) * 2.3) % 4
+		match edge:
+			0:  # Left edge
+				px = -1.0
+				py = h * (1.0 - cycle) - rise * 20.0
+			1:  # Right edge
+				px = w + 1.0
+				py = h * cycle - rise * 20.0
+			2:  # Top edge
+				px = w * cycle
+				py = -1.0 - rise * 15.0
+			_:  # Bottom edge
+				px = w * (1.0 - cycle)
+				py = h + 1.0 - rise * 25.0
+
+		# Alpha fades based on rise
+		var sparkle_alpha := (1.0 - rise) * 0.6
+		var sparkle_size := 1.5 + sin(phase * 3.0) * 0.5
+		var col := Color(glow_color.r, glow_color.g, glow_color.b, sparkle_alpha)
+		draw_circle(Vector2(px, py), sparkle_size, col)
+		# Brighter core
+		draw_circle(Vector2(px, py), sparkle_size * 0.4, Color(1.0, 1.0, 1.0, sparkle_alpha * 0.5))
 
 
 func _draw_wrapped_text(text: String, rect: Rect2, font_size: int) -> void:

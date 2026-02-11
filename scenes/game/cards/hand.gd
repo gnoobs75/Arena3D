@@ -23,6 +23,7 @@ var _is_ready: bool = false
 var card_preview: CardVisual = null
 var preview_container: Control = null
 
+var response_slot_node: Control = null  # ResponseSlot, typed as Control to avoid cyclic ref
 var player_id: int = 1
 var card_visuals: Dictionary = {}  # card_index -> CardVisual
 var selected_card: String = ""
@@ -82,19 +83,31 @@ func _create_ui() -> void:
 	main_container.mouse_filter = Control.MOUSE_FILTER_PASS
 	add_child(main_container)
 
-	# Discard pile on left
+	# === 1. Discard pile (far left) ===
 	discard_pile = DISCARD_SCENE.instantiate() as DiscardPile
 	discard_pile.setup(player_id)
 	discard_pile.pile_clicked.connect(_on_discard_clicked)
-	discard_pile.custom_minimum_size = Vector2(110, 0)  # Slightly wider
+	discard_pile.custom_minimum_size = Vector2(110, 0)
 	main_container.add_child(discard_pile)
 
-	# Separator with styling
-	var separator := VSeparator.new()
-	separator.custom_minimum_size = Vector2(2, 0)
-	main_container.add_child(separator)
+	# Separator
+	var sep1 := VSeparator.new()
+	sep1.custom_minimum_size = Vector2(2, 0)
+	main_container.add_child(sep1)
 
-	# Cards container (takes remaining space)
+	# === 2. Response Window (placeholder, replaced via set_response_slot) ===
+	var _response_placeholder := Control.new()
+	_response_placeholder.name = "ResponsePlaceholder"
+	_response_placeholder.custom_minimum_size = Vector2(130, 0)
+	_response_placeholder.visible = false
+	main_container.add_child(_response_placeholder)
+
+	# Separator
+	var sep2 := VSeparator.new()
+	sep2.custom_minimum_size = Vector2(2, 0)
+	main_container.add_child(sep2)
+
+	# === 3. Cards panel (takes remaining space, cards centered inside) ===
 	var cards_panel := PanelContainer.new()
 	cards_panel.name = "CardsPanel"
 	cards_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -105,10 +118,10 @@ func _create_ui() -> void:
 	style.set_border_width_all(1)
 	style.border_color = VisualTheme.UI_PANEL_BORDER.lerp(VisualTheme.PLAYER1_COLOR, 0.2)
 	style.set_corner_radius_all(6)
-	style.set_content_margin_all(VisualTheme.PADDING_PANEL)
+	style.set_content_margin_all(8)
 	style.shadow_color = VisualTheme.SHADOW_SOFT
 	style.shadow_size = 4
-	style.shadow_offset = Vector2(0, -2)  # Shadow on top for inset effect
+	style.shadow_offset = Vector2(0, -2)
 	cards_panel.add_theme_stylebox_override("panel", style)
 	main_container.add_child(cards_panel)
 
@@ -146,6 +159,32 @@ func setup(player: int) -> void:
 		discard_pile.setup(player)
 
 
+func set_response_slot(slot: Control) -> void:
+	"""Reparent response slot into the hand bar, replacing the placeholder."""
+	response_slot_node = slot
+	var main_container := get_node_or_null("MainContainer")
+	if main_container == null:
+		return
+	# Remove placeholder and insert response window at same index
+	var placeholder := main_container.get_node_or_null("ResponsePlaceholder")
+	if placeholder:
+		var idx := placeholder.get_index()
+		main_container.remove_child(placeholder)
+		placeholder.queue_free()
+		if slot.get_parent():
+			slot.get_parent().remove_child(slot)
+		# Wrap slot in a labeled container
+		var wrapper := VBoxContainer.new()
+		wrapper.name = "ResponseWindow"
+		wrapper.custom_minimum_size = Vector2(130, 0)
+		wrapper.alignment = BoxContainer.ALIGNMENT_CENTER
+		# Add slot centered in wrapper
+		slot.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		wrapper.add_child(slot)
+		main_container.add_child(wrapper)
+		main_container.move_child(wrapper, idx)
+
+
 var _previous_hand_size: int = 0
 
 var _game_state: GameState = null
@@ -155,10 +194,15 @@ func set_game_state(state: GameState) -> void:
 	_game_state = state
 
 
-func update_hand(hand: Array, mana: int, valid_responses: Array[String] = [], restricted_cards: Array[String] = []) -> void:
+var _cost_locked_cards: Array[String] = []  # Cards blocked by maxCastCost (Guess Again)
+
+
+func update_hand(hand: Array, mana: int, valid_responses: Array[String] = [], restricted_cards: Array[String] = [], cost_locked_cards: Array[String] = []) -> void:
 	"""Update displayed cards from hand array.
 	valid_responses: If non-empty, these response cards are playable (response window is open).
-	restricted_cards: Cards that cannot be played due to game state (e.g. champion already attacked)."""
+	restricted_cards: Cards that cannot be played due to game state (e.g. champion already attacked).
+	cost_locked_cards: Cards blocked by maxCastCost debuff (show red X on cost)."""
+	_cost_locked_cards = cost_locked_cards
 	if not _is_ready or cards_container == null:
 		return
 
@@ -208,17 +252,24 @@ func update_hand(hand: Array, mana: int, valid_responses: Array[String] = [], re
 		card_visual.pivot_offset = card_visual.size / 2
 		card_visual.scale = Vector2(0.85, 0.85)
 		var tween := card_visual.create_tween()
-		tween.tween_interval(i * 0.04)
-		tween.tween_property(card_visual, "modulate:a", 1.0, 0.2).set_ease(Tween.EASE_OUT)
-		tween.parallel().tween_property(card_visual, "scale", Vector2.ONE, 0.25).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
 
-		# Newly drawn card gets a stronger golden flash highlight
 		if is_new_card:
-			card_visual.scale = Vector2(1.15, 1.15)
-			tween.tween_property(card_visual, "modulate", Color(1.5, 1.3, 0.7), 0.12)
-			tween.parallel().tween_property(card_visual, "scale", Vector2(1.08, 1.08), 0.1).set_ease(Tween.EASE_OUT)
-			tween.tween_property(card_visual, "modulate", Color.WHITE, 0.35)
+			# Newly drawn card flies in from top-right of screen
+			card_visual.scale = Vector2(0.5, 0.5)
+			card_visual.position = Vector2(size.x * 0.7, -VisualTheme.CARD_HEIGHT * 1.5)
+			card_visual.modulate.a = 0.6
+			tween.set_parallel(true)
+			tween.tween_property(card_visual, "position", Vector2.ZERO, 0.3).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+			tween.tween_property(card_visual, "scale", Vector2(1.08, 1.08), 0.25).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+			tween.tween_property(card_visual, "modulate:a", 1.0, 0.2).set_ease(Tween.EASE_OUT)
+			# Golden flash on arrival
+			tween.chain().tween_property(card_visual, "modulate", Color(1.5, 1.3, 0.7), 0.12)
+			tween.tween_property(card_visual, "modulate", Color.WHITE, 0.3)
 			tween.parallel().tween_property(card_visual, "scale", Vector2.ONE, 0.2).set_ease(Tween.EASE_IN_OUT)
+		else:
+			tween.tween_interval(i * 0.04)
+			tween.tween_property(card_visual, "modulate:a", 1.0, 0.2).set_ease(Tween.EASE_OUT)
+			tween.parallel().tween_property(card_visual, "scale", Vector2.ONE, 0.25).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
 
 
 func update_discard(discard: Array) -> void:
@@ -247,6 +298,8 @@ func _create_card_visual(card_name: String, is_playable: bool, index: int) -> Ca
 		if effective != base_cost:
 			card.cost_override = effective
 	card.setup(card_name, is_playable)
+	if card_name in _cost_locked_cards:
+		card.is_cost_locked = true
 	card.card_clicked.connect(_on_card_clicked)
 	card.card_hovered.connect(_on_card_hovered)
 	card.card_unhovered.connect(_on_card_unhovered)

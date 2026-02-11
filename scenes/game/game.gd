@@ -47,6 +47,7 @@ enum InputMode {
 var input_mode: InputMode = InputMode.SELECT_CHAMPION
 var selected_champion_id: String = ""
 var selected_card: String = ""
+var _cost_locked_cards: Array[String] = []  # Cards blocked by maxCastCost debuff
 var is_player_turn: bool = true
 var ai_vs_ai_mode: bool = false
 var ai_player1: AIController  # AI for player 1 in AI vs AI mode
@@ -132,6 +133,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		_on_end_turn_pressed()
 
 
+func _process(delta: float) -> void:
+	_process_inspector_hover(delta)
+
+
 var layout: LayoutManager = LayoutManager.new()
 
 
@@ -165,10 +170,13 @@ func _setup_scene() -> void:
 		# Connect board signals
 		board.tile_clicked.connect(_on_tile_clicked)
 		board.champion_clicked.connect(_on_champion_clicked)
+		board.tile_hovered.connect(_on_tile_hovered_for_inspector)
+		board.tile_unhovered.connect(_on_tile_unhovered_for_inspector)
 
 		# Connect AnimationController to board for Battle Chess animations
 		if AnimationController:
 			AnimationController.set_board(board)
+			AnimationController.setup_flash_overlay(self)
 
 	# Create HUD (CanvasLayer for UI elements)
 	hud = HUD_SCENE.instantiate()
@@ -190,10 +198,10 @@ func _setup_scene() -> void:
 	hand_ui.card_deselected.connect(_on_card_deselected)
 	hand_ui.card_toggled.connect(_on_discard_card_toggled)
 
-	# Create response slot - positioned to the LEFT of the board, vertically centered
+	# Create response slot - embedded in hand bar (left of discard pile)
 	response_slot = ResponseSlot.new()
-	response_slot.position = layout.response_slot_rect.position
-	add_child(response_slot)
+	# Don't add as direct child - hand_ui will own it
+	hand_ui.set_response_slot(response_slot)
 
 	# Connect response slot signals
 	response_slot.slot_clicked.connect(_on_response_slot_clicked)
@@ -240,15 +248,7 @@ func _setup_scene() -> void:
 			hand_default_pos, hand_default_size)
 		hud.add_child(hand_wrapper)
 
-		# Wrap response slot — move from Node2D scene to HUD CanvasLayer for proper Control positioning
-		var rs_pos := response_slot.position
-		remove_child(response_slot)
-		response_slot.position = Vector2.ZERO
-		var rs_default_size := Vector2(ResponseSlot.SLOT_WIDTH, ResponseSlot.SLOT_HEIGHT + DraggableWrapper.TITLE_BAR_HEIGHT)
-		var rs_wrapper := DraggableWrapper.wrap(
-			response_slot, "response_slot", "Response Slot",
-			rs_pos, rs_default_size)
-		hud.add_child(rs_wrapper)
+		# Response slot is now embedded in hand bar, no separate wrapper needed
 
 		# Enable HUD developer layout (sidebars, turn info, combat log)
 		hud.enable_developer_layout()
@@ -521,6 +521,12 @@ func _start_game() -> void:
 	if UIAnimator:
 		UIAnimator.transition_fade_in(0.4)
 
+	# WWE-style champion entrances (2D board only)
+	if not use_3d_board and board:
+		# Wait for board reveal to finish first
+		await get_tree().create_timer(0.7).timeout
+		await board.play_champion_entrances()
+
 	# Start the game
 	game_controller.start_game()
 
@@ -580,14 +586,18 @@ func _on_turn_started(player_id: int, round_number: int) -> void:
 		var ai_name: String = "AI 1 (Blue)" if player_id == 1 else "AI 2 (Red)"
 		hud.show_message("%s is thinking..." % ai_name)
 		hud.set_action_buttons_enabled(false)
+		EventBus.ai_thinking_started.emit(player_id)
 		await get_tree().create_timer(0.8).timeout  # Longer delay for visibility
 		await current_ai.take_turn()
+		EventBus.ai_thinking_finished.emit(player_id)
 	elif not is_player_turn:
 		# Player 2 AI turn
 		hud.show_message("AI is thinking...")
 		hud.set_action_buttons_enabled(false)
+		EventBus.ai_thinking_started.emit(2)
 		await get_tree().create_timer(0.5).timeout
 		await ai_controller.take_turn()
+		EventBus.ai_thinking_finished.emit(2)
 	else:
 		hud.show_message("Your turn!")
 		hud.set_action_buttons_enabled(true)
@@ -837,6 +847,12 @@ func _on_champion_clicked(champion_id: String) -> void:
 		return
 
 	if not is_player_turn:
+		# Show inspector on opponent's turn
+		var state2 := game_controller.get_game_state()
+		var champ2 := state2.get_champion(champion_id)
+		if champ2 and hud and board:
+			var screen_pos := board.get_champion_screen_position(champion_id)
+			hud.show_champion_inspector(champ2, screen_pos)
 		return
 
 	var state := game_controller.get_game_state()
@@ -878,6 +894,10 @@ func _on_champion_clicked(champion_id: String) -> void:
 
 func _on_tile_clicked(position: Vector2i) -> void:
 	"""Handle clicking on an empty tile."""
+	# Hide inspector on any tile click
+	if hud:
+		hud.hide_champion_inspector()
+
 	# Immediate movement is allowed even when not player's turn (response phase)
 	if input_mode == InputMode.IMMEDIATE_MOVE:
 		_try_immediate_move(position)
@@ -1180,14 +1200,10 @@ func _try_cast_on_target(target_id: String) -> void:
 	if selected_card.is_empty():
 		return
 
-	# Auto-select caster if none selected
+	# Auto-select caster: use card's owning champion
 	var caster_id := selected_champion_id
-	var local_pid := NetworkManager.local_player_id if is_network_game else 1
 	if caster_id.is_empty():
-		var state := game_controller.get_game_state()
-		for champ: ChampionState in state.get_living_champions(local_pid):
-			caster_id = champ.unique_id
-			break
+		caster_id = _find_caster_for_card(selected_card)
 
 	if caster_id.is_empty():
 		print("No valid caster found")
@@ -1229,17 +1245,13 @@ func _try_cast_no_target() -> void:
 		print("  ERROR: selected_card is empty!")
 		return
 
-	# Use selected champion or first living champion as caster
+	# Use selected champion or card's owning champion as caster
 	var state := game_controller.get_game_state()
-	var local_pid := NetworkManager.local_player_id if is_network_game else 1
 	var caster_id := selected_champion_id
 	print("  selected_champion_id='%s'" % selected_champion_id)
 	if caster_id.is_empty():
-		print("  No champion selected, finding first living champion...")
-		for champ: ChampionState in state.get_living_champions(local_pid):
-			caster_id = champ.unique_id
-			print("  Found: %s" % caster_id)
-			break
+		caster_id = _find_caster_for_card(selected_card)
+		print("  Auto-selected caster: %s" % caster_id)
 
 	if caster_id.is_empty():
 		print("  ERROR: No caster found!")
@@ -1295,9 +1307,7 @@ func _on_viewport_resized() -> void:
 		board_3d_viewport.position = layout.board_rect.position
 		board_3d_viewport.size = layout.board_rect.size
 
-	# Update response slot
-	if response_slot and is_instance_valid(response_slot):
-		response_slot.position = layout.response_slot_rect.position
+	# Response slot is now inside hand_ui, no manual position update needed
 
 	# Update HUD layout
 	if hud:
@@ -1401,6 +1411,49 @@ func _try_break_hypnotize(champion_id: String) -> void:
 
 	# Now select the freed champion normally
 	_select_champion(champion_id)
+
+
+var _hover_inspector_timer: float = 0.0
+var _hover_inspector_pos: Vector2i = Vector2i(-1, -1)
+var _hover_inspector_active: bool = false
+
+
+func _on_tile_hovered_for_inspector(pos: Vector2i) -> void:
+	"""Track hover for champion inspector display."""
+	if _hover_inspector_pos != pos:
+		_hover_inspector_pos = pos
+		_hover_inspector_timer = 0.0
+		_hover_inspector_active = false
+		# If hovering a champion, show after delay; otherwise hide
+		if game_controller:
+			var state := game_controller.get_game_state()
+			var champ_at := state.get_champion_at(pos)
+			if champ_at == null and hud:
+				hud.hide_champion_inspector()
+
+
+func _on_tile_unhovered_for_inspector(_pos: Vector2i) -> void:
+	"""Hide inspector when un-hovering."""
+	_hover_inspector_pos = Vector2i(-1, -1)
+	_hover_inspector_active = false
+	if hud:
+		hud.hide_champion_inspector()
+
+
+func _process_inspector_hover(delta: float) -> void:
+	"""Show inspector after hovering a champion tile for 0.3 seconds."""
+	if _hover_inspector_active or _hover_inspector_pos == Vector2i(-1, -1):
+		return
+	if not game_controller or not board or not hud:
+		return
+	_hover_inspector_timer += delta
+	if _hover_inspector_timer >= 0.3:
+		_hover_inspector_active = true
+		var state := game_controller.get_game_state()
+		var champ_at := state.get_champion_at(_hover_inspector_pos)
+		if champ_at and champ_at.is_alive():
+			var screen_pos := board.get_champion_screen_position(champ_at.unique_id)
+			hud.show_champion_inspector(champ_at, screen_pos)
 
 
 func _on_end_turn_pressed() -> void:
@@ -1691,10 +1744,11 @@ func _update_ui() -> void:
 		if priority_player == local_pid:
 			valid_responses = game_controller.response_stack.get_valid_responses(local_pid)
 
-	# Compute cards restricted by champion state (e.g. already attacked/moved)
+	# Compute cards restricted by champion state (e.g. already attacked/moved, maxCastCost debuff)
+	_cost_locked_cards.clear()
 	var restricted: Array[String] = _get_restricted_cards(state, hand)
 
-	hand_ui.update_hand(hand, mana, valid_responses, restricted)
+	hand_ui.update_hand(hand, mana, valid_responses, restricted, _cost_locked_cards)
 
 	# Update discard pile for local player
 	var discard := state.get_discard(local_pid)
@@ -1707,7 +1761,8 @@ func _update_ui() -> void:
 
 func _get_restricted_cards(state: GameState, hand: Array) -> Array[String]:
 	"""Get cards that can't be played due to champion state restrictions.
-	E.g. cards with canAttack:false on self are restricted if the owning champion already attacked."""
+	E.g. cards with canAttack:false on self are restricted if the owning champion already attacked.
+	Also checks maxCastCost debuff (Guess Again spell lockout)."""
 	var restricted: Array[String] = []
 	var local_pid := NetworkManager.local_player_id if is_network_game else 1
 	for card_name: String in hand:
@@ -1725,6 +1780,14 @@ func _get_restricted_cards(state: GameState, hand: Array) -> Array[String]:
 					restricted.append(card_name)
 				elif _card_prevents_move_on_self(card_data) and champ.has_moved:
 					restricted.append(card_name)
+				# maxCastCost debuff blocks casting cards at or below X cost
+				elif champ.has_debuff("maxCastCost"):
+					var max_blocked: int = champ.get_debuff_stacks("maxCastCost")
+					var cost: int = state.get_effective_cost(card_name)
+					if cost <= max_blocked:
+						restricted.append(card_name)
+						if not _cost_locked_cards.has(card_name):
+							_cost_locked_cards.append(card_name)
 				break
 	return restricted
 
@@ -1755,6 +1818,20 @@ func _card_prevents_move_on_self(card_data: Dictionary) -> bool:
 				if debuff_target == "self" or (debuff_target == "" and card_target in ["self", "none"]):
 					return true
 	return false
+
+
+func _find_caster_for_card(card_name: String) -> String:
+	"""Find the living champion that owns the given card on the local player's team."""
+	var card_data := CardDatabase.get_card(card_name)
+	var card_character: String = card_data.get("character", "")
+	if card_character.is_empty():
+		return ""
+	var state := game_controller.get_game_state()
+	var local_pid := NetworkManager.local_player_id if is_network_game else 1
+	for champ: ChampionState in state.get_living_champions(local_pid):
+		if champ.champion_name == card_character:
+			return champ.unique_id
+	return ""
 
 
 func _get_enemy_positions() -> Array[Vector2i]:
@@ -1890,13 +1967,10 @@ func _get_caster_position() -> Vector2i:
 	"""Get position of the caster for the current card."""
 	var state := game_controller.get_game_state()
 
-	# Use selected champion or first living champion
-	var local_pid := NetworkManager.local_player_id if is_network_game else 1
+	# Use selected champion or card's owning champion
 	var caster_id := selected_champion_id
 	if caster_id.is_empty():
-		for champ: ChampionState in state.get_living_champions(local_pid):
-			caster_id = champ.unique_id
-			break
+		caster_id = _find_caster_for_card(selected_card)
 
 	if caster_id.is_empty():
 		return Vector2i(-1, -1)
@@ -1928,14 +2002,14 @@ func _try_cast_direction(clicked_pos: Vector2i) -> void:
 
 	print("Direction selected: %s (diff=%s)" % [direction, diff])
 
-	# Get caster
+	# Get caster - use card's owning champion
 	var state := game_controller.get_game_state()
-	var local_pid := NetworkManager.local_player_id if is_network_game else 1
 	var caster_id := selected_champion_id
 	if caster_id.is_empty():
-		for champ: ChampionState in state.get_living_champions(local_pid):
-			caster_id = champ.unique_id
-			break
+		caster_id = _find_caster_for_card(selected_card)
+
+	if caster_id.is_empty():
+		return
 
 	if is_network_game and not network_proxy.is_host:
 		# Guest: send request to host
@@ -1973,14 +2047,10 @@ func _try_cast_on_position(target_pos: Vector2i) -> void:
 	if selected_card.is_empty():
 		return
 
-	# Get caster
-	var state := game_controller.get_game_state()
-	var local_pid := NetworkManager.local_player_id if is_network_game else 1
+	# Get caster - use card's owning champion
 	var caster_id := selected_champion_id
 	if caster_id.is_empty():
-		for champ: ChampionState in state.get_living_champions(local_pid):
-			caster_id = champ.unique_id
-			break
+		caster_id = _find_caster_for_card(selected_card)
 
 	if caster_id.is_empty():
 		return

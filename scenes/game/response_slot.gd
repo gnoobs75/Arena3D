@@ -17,9 +17,9 @@ var response_window_active: bool = false  # Pulsing glow when response window op
 var _pulse_time: float = 0.0
 
 # Visual settings
-const SLOT_WIDTH := 145
-const SLOT_HEIGHT := 195
-const BORDER_WIDTH := 3
+const SLOT_WIDTH := 110
+const SLOT_HEIGHT := 140
+const BORDER_WIDTH := 2
 
 
 func _ready() -> void:
@@ -78,11 +78,11 @@ func _update_card_visual() -> void:
 	add_child(card_visual)
 
 	# Scale card to fit slot
-	var scale_factor := 0.85
+	var scale_factor := 0.65
 	card_visual.scale = Vector2(scale_factor, scale_factor)
 	card_visual.position = Vector2(
 		(SLOT_WIDTH - VisualTheme.CARD_WIDTH * scale_factor) / 2,
-		(SLOT_HEIGHT - VisualTheme.CARD_HEIGHT * scale_factor) / 2
+		(SLOT_HEIGHT - VisualTheme.CARD_HEIGHT * scale_factor) / 2 - 4
 	)
 
 	card_visual.setup(slotted_card, true)
@@ -142,27 +142,22 @@ func _draw() -> void:
 	# Label
 	var font := ThemeDB.fallback_font
 	var label_text := "RESPONSE"
-	var label_size := font.get_string_size(label_text, HORIZONTAL_ALIGNMENT_CENTER, -1, 10)
-	var label_pos := Vector2((w - label_size.x) / 2, h - 8)
+	var label_size := font.get_string_size(label_text, HORIZONTAL_ALIGNMENT_CENTER, -1, 9)
+	var label_pos := Vector2((w - label_size.x) / 2, h - 5)
 	var label_col := VisualTheme.RESPONSE_PULSE_COLOR if response_window_active else Color(0.6, 0.6, 0.7)
-	draw_string(font, label_pos, label_text, HORIZONTAL_ALIGNMENT_CENTER, -1, 10, label_col)
+	draw_string(font, label_pos, label_text, HORIZONTAL_ALIGNMENT_CENTER, -1, 9, label_col)
 
 	# If empty, show hint
 	if slotted_card.is_empty():
 		var hint_text := "Drop"
-		var hint_size := font.get_string_size(hint_text, HORIZONTAL_ALIGNMENT_CENTER, -1, 12)
-		var hint_pos := Vector2((w - hint_size.x) / 2, h / 2 - 10)
-		draw_string(font, hint_pos, hint_text, HORIZONTAL_ALIGNMENT_CENTER, -1, 12, Color(0.5, 0.5, 0.6))
+		var hint_size := font.get_string_size(hint_text, HORIZONTAL_ALIGNMENT_CENTER, -1, 11)
+		var hint_pos := Vector2((w - hint_size.x) / 2, h / 2 - 6)
+		draw_string(font, hint_pos, hint_text, HORIZONTAL_ALIGNMENT_CENTER, -1, 11, Color(0.5, 0.5, 0.6))
 
 		var hint_text2 := "Response"
-		var hint_size2 := font.get_string_size(hint_text2, HORIZONTAL_ALIGNMENT_CENTER, -1, 12)
-		var hint_pos2 := Vector2((w - hint_size2.x) / 2, h / 2 + 5)
-		draw_string(font, hint_pos2, hint_text2, HORIZONTAL_ALIGNMENT_CENTER, -1, 12, Color(0.5, 0.5, 0.6))
-
-		var hint_text3 := "Card"
-		var hint_size3 := font.get_string_size(hint_text3, HORIZONTAL_ALIGNMENT_CENTER, -1, 12)
-		var hint_pos3 := Vector2((w - hint_size3.x) / 2, h / 2 + 20)
-		draw_string(font, hint_pos3, hint_text3, HORIZONTAL_ALIGNMENT_CENTER, -1, 12, Color(0.5, 0.5, 0.6))
+		var hint_size2 := font.get_string_size(hint_text2, HORIZONTAL_ALIGNMENT_CENTER, -1, 11)
+		var hint_pos2 := Vector2((w - hint_size2.x) / 2, h / 2 + 8)
+		draw_string(font, hint_pos2, hint_text2, HORIZONTAL_ALIGNMENT_CENTER, -1, 11, Color(0.5, 0.5, 0.6))
 
 
 func get_trigger() -> String:

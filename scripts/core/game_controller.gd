@@ -438,6 +438,12 @@ func _cast_equipment(card_name: String, caster: ChampionState, targets: Array) -
 	if game_state.get_mana(caster.owner_id) < cost:
 		return {"success": false, "error": "Not enough mana"}
 
+	# Check maxCastCost debuff (Guess Again spell lockout)
+	if caster.has_debuff("maxCastCost"):
+		var max_blocked: int = caster.get_debuff_stacks("maxCastCost")
+		if cost <= max_blocked:
+			return {"success": false, "error": "Spell locked (cost %d blocked by Guess Again)" % cost}
+
 	# Spend mana and remove from hand
 	game_state.spend_mana(caster.owner_id, cost)
 	game_state.play_card(caster.owner_id, card_name)
@@ -674,7 +680,10 @@ func _get_responding_player_for_trigger(trigger: String, context: Dictionary) ->
 			# Opponent responds
 			return 2 if game_state.active_player == 1 else 1
 
-		"endTurn", "startTurn":
+		"endTurn":
+			# Non-active player responds (e.g., Pick Pocket fires at end of opponent's turn)
+			return 2 if game_state.active_player == 1 else 1
+		"startTurn":
 			# The player whose turn it is responds
 			return game_state.active_player
 

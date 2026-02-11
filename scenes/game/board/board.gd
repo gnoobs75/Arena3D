@@ -37,6 +37,9 @@ var attack_highlights: Array[Vector2i] = []
 var cast_highlights: Array[Vector2i] = []
 var range_highlights: Array[Vector2i] = []  # Yellow range indicator
 
+# Battle scars - persistent marks on the board
+var _battle_scars: Array[Dictionary] = []  # { "pos": Vector2i, "type": String, "color": Color, "alpha": float }
+
 
 func _ready() -> void:
 	# Get node references safely
@@ -287,6 +290,90 @@ func trigger_equip_glow(grid_pos: Vector2i) -> void:
 func trigger_smoke_poof(grid_pos: Vector2i) -> void:
 	"""Trigger smoke bomb cloud effect at champion position."""
 	vfx_above.spawn_smoke_poof(_grid_to_world(grid_pos))
+
+
+func trigger_lightning_arc(from_grid: Vector2i, to_grid: Vector2i, color: Color = Color(0.6, 0.8, 1.0)) -> void:
+	vfx_above.spawn_lightning_arc(_grid_to_world(from_grid), _grid_to_world(to_grid), color)
+
+
+func trigger_holy_pillar(grid_pos: Vector2i) -> void:
+	vfx_above.spawn_holy_pillar(_grid_to_world(grid_pos))
+
+
+func trigger_shadow_tendrils(grid_pos: Vector2i, color: Color = Color(0.15, 0.05, 0.2)) -> void:
+	vfx_above.spawn_shadow_tendrils(_grid_to_world(grid_pos), color)
+
+
+func trigger_blood_splatter(grid_pos: Vector2i) -> void:
+	vfx_above.spawn_blood_splatter(_grid_to_world(grid_pos))
+
+
+func trigger_leaf_swirl(grid_pos: Vector2i) -> void:
+	vfx_above.spawn_leaf_swirl(_grid_to_world(grid_pos))
+
+
+func trigger_ground_crack(grid_pos: Vector2i) -> void:
+	vfx_below.spawn_ground_crack(_grid_to_world(grid_pos))
+
+
+func trigger_arrow_volley(grid_pos: Vector2i) -> void:
+	vfx_above.spawn_arrow_volley(_grid_to_world(grid_pos))
+
+
+func trigger_flask_splash(grid_pos: Vector2i, flask_color: Color = Color(0.3, 0.9, 0.15)) -> void:
+	vfx_above.spawn_flask_splash(_grid_to_world(grid_pos), flask_color)
+
+
+func trigger_mirror_shards(grid_pos: Vector2i) -> void:
+	vfx_above.spawn_mirror_shards(_grid_to_world(grid_pos))
+
+
+func trigger_dagger_glint(from_grid: Vector2i, to_grid: Vector2i) -> void:
+	vfx_above.spawn_dagger_glint(_grid_to_world(from_grid), _grid_to_world(to_grid))
+
+
+func trigger_chain_wrap(grid_pos: Vector2i) -> void:
+	vfx_above.spawn_chain_wrap(_grid_to_world(grid_pos))
+
+
+func trigger_shockwave(grid_pos: Vector2i, color: Color = Color(0.8, 0.7, 0.5)) -> void:
+	vfx_above.spawn_shockwave(_grid_to_world(grid_pos), color)
+
+
+func add_battle_scar(grid_pos: Vector2i, scar_type: String, color: Color = Color(0.3, 0.05, 0.05, 0.4)) -> void:
+	"""Add a persistent battle scar at a grid position."""
+	_battle_scars.append({
+		"pos": grid_pos,
+		"type": scar_type,
+		"color": color,
+		"alpha": color.a,
+	})
+
+
+func fade_battle_scars() -> void:
+	"""Fade scars by 0.1 per call (call each turn). Remove fully faded ones."""
+	var i := _battle_scars.size() - 1
+	while i >= 0:
+		_battle_scars[i]["alpha"] = float(_battle_scars[i]["alpha"]) - 0.1
+		if float(_battle_scars[i]["alpha"]) < 0.05:
+			_battle_scars.remove_at(i)
+		i -= 1
+	# Redraw tiles that have scars
+	for y in range(BOARD_SIZE):
+		for x in range(BOARD_SIZE):
+			var tile: Control = tile_nodes[y][x]
+			var drawer: TileDrawer = tile.get_child(0) as TileDrawer
+			if drawer:
+				drawer.queue_redraw()
+
+
+func get_battle_scars_at(pos: Vector2i) -> Array[Dictionary]:
+	"""Get all battle scars at a position for drawing."""
+	var result: Array[Dictionary] = []
+	for scar in _battle_scars:
+		if scar["pos"] as Vector2i == pos:
+			result.append(scar)
+	return result
 
 
 func _create_champions() -> void:
@@ -571,13 +658,117 @@ func play_board_reveal() -> void:
 			tween.tween_property(tile, "modulate:a", 1.0, 0.2).set_ease(Tween.EASE_OUT)
 			tween.parallel().tween_property(tile, "scale", Vector2.ONE, 0.25).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
 
-	# Champions fade in after board
+	# Hide champions initially - they'll walk in via entrances
 	for id in champion_nodes:
 		var visual: ChampionVisual = champion_nodes[id]
 		visual.modulate.a = 0.0
-		var tween := visual.create_tween()
-		tween.tween_interval(0.5)
-		tween.tween_property(visual, "modulate:a", 1.0, 0.3).set_ease(Tween.EASE_OUT)
+
+
+func trigger_crowd_reaction(reaction_type: String) -> void:
+	"""Bridge to arena crowd layer for crowd reactions."""
+	if crowd_layer and crowd_layer.has_method("_trigger_reaction"):
+		match reaction_type:
+			"kill":
+				crowd_layer._trigger_reaction("cheer", 1.0)
+			"entrance":
+				crowd_layer._trigger_reaction("cheer", 0.8)
+			_:
+				crowd_layer._trigger_reaction(reaction_type, 0.7)
+
+
+func play_champion_entrances() -> void:
+	"""WWE-style champion walkout entrances. Champions walk from off-screen
+	through the crowd to their starting positions, one at a time."""
+	if game_state == null:
+		return
+
+	# Gather all champions grouped by player
+	var p1_champs: Array[ChampionState] = []
+	var p2_champs: Array[ChampionState] = []
+	for champ: ChampionState in game_state.get_all_champions():
+		if champ.owner_id == 1:
+			p1_champs.append(champ)
+		else:
+			p2_champs.append(champ)
+
+	# Entrance order: P1 champ 1, P2 champ 1, P1 champ 2, P2 champ 2
+	var entrance_order: Array[ChampionState] = []
+	for i in range(maxi(p1_champs.size(), p2_champs.size())):
+		if i < p1_champs.size():
+			entrance_order.append(p1_champs[i])
+		if i < p2_champs.size():
+			entrance_order.append(p2_champs[i])
+
+	for champ in entrance_order:
+		await _play_single_entrance(champ)
+		# Brief pause between entrances
+		await get_tree().create_timer(0.3).timeout
+
+
+func _play_single_entrance(champ: ChampionState) -> void:
+	"""Animate a single champion walking from off-screen to their starting position."""
+	if not champion_nodes.has(champ.unique_id):
+		return
+
+	var visual: ChampionVisual = champion_nodes[champ.unique_id]
+	var target_pos := _grid_to_world(champ.position)
+
+	# Determine entrance direction: P1 enters from bottom, P2 from top
+	var start_pos: Vector2
+	var board_px := BOARD_SIZE * TILE_SIZE
+	if champ.owner_id == 1:
+		# Enter from bottom of board
+		start_pos = Vector2(target_pos.x, board_px + 120)
+	else:
+		# Enter from top of board
+		start_pos = Vector2(target_pos.x, -120)
+
+	# Set champion to start position, fully visible
+	visual.position = start_pos
+	visual.modulate.a = 1.0
+
+	# Show nameplate banner via AnimationController
+	if AnimationController:
+		AnimationController.show_entrance_nameplate(champ.champion_name, champ.owner_id)
+
+	# Trigger crowd reaction
+	trigger_crowd_reaction("entrance")
+
+	# Trigger entrance crowd chant via the crowd layer
+	if crowd_layer and crowd_layer.has_method("_spawn_shout"):
+		var chants: Array = []
+		if crowd_layer.get("CHAMPION_CHANTS") != null:
+			var all_chants: Dictionary = crowd_layer.CHAMPION_CHANTS
+			if all_chants.has(champ.champion_name):
+				chants = all_chants[champ.champion_name]
+		if not chants.is_empty():
+			crowd_layer._spawn_shout(chants, 1.5)
+
+	# Start walk animation toward target
+	var walk_dir := Vector2(target_pos - start_pos).normalized()
+	visual.play_walk_animation(walk_dir)
+
+	# Create entrance tween - walk from off-screen to target
+	var distance := start_pos.distance_to(target_pos)
+	var walk_duration := clampf(distance / 350.0, 0.6, 1.8)
+
+	var tween := create_tween()
+	tween.set_ease(Tween.EASE_OUT)
+	tween.set_trans(Tween.TRANS_CUBIC)
+	tween.tween_property(visual, "position", target_pos, walk_duration)
+
+	await tween.finished
+
+	# Arrival flourish - slight bounce and scale pop
+	var arrive_tween := create_tween()
+	visual.scale = Vector2(1.15, 0.9)
+	arrive_tween.tween_property(visual, "scale", Vector2.ONE, 0.25).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+
+	# Dust cloud on landing
+	trigger_dust(champ.position)
+	trigger_dust(champ.position)
+
+	await arrive_tween.finished
 
 
 func get_board_size_pixels() -> Vector2:
@@ -606,6 +797,34 @@ class TileDrawer extends Control:
 				_draw_pit_tile(w, h, lighting)
 			_:  # EMPTY - raised stone slab with depth
 				_draw_empty_tile(w, h, is_alt, lighting)
+
+		# Draw battle scars on top of tile
+		var board_node := get_parent().get_parent().get_parent()
+		if board_node is GameBoard:
+			var scars := (board_node as GameBoard).get_battle_scars_at(Vector2i(tile_x, tile_y))
+			for scar in scars:
+				var scar_alpha := float(scar.get("alpha", 0.3))
+				var scar_color: Color = scar.get("color", Color(0.3, 0.05, 0.05)) as Color
+				scar_color.a = scar_alpha
+				var scar_type: String = str(scar.get("type", "blood"))
+				match scar_type:
+					"blood":
+						# Blood stain splatter
+						for si in range(4):
+							var sx := w * 0.5 + sin(float(si) * 3.7 + float(tile_x)) * w * 0.25
+							var sy := h * 0.5 + sin(float(si) * 5.1 + float(tile_y)) * h * 0.25
+							var sr := 4.0 + sin(float(si) * 2.3) * 3.0
+							draw_circle(Vector2(sx, sy), sr, scar_color)
+					"scorch":
+						# Scorch mark - dark circle
+						draw_circle(Vector2(w * 0.5, h * 0.5), w * 0.3, scar_color)
+					"crack":
+						# Crack lines
+						var cx := w * 0.5
+						var cy := h * 0.5
+						for si in range(3):
+							var angle := float(si) / 3.0 * TAU + 0.5
+							draw_line(Vector2(cx, cy), Vector2(cx + cos(angle) * 20.0, cy + sin(angle) * 20.0), scar_color, 1.5)
 
 	func _draw_empty_tile(w: float, h: float, is_alt: bool, lighting: float) -> void:
 		var depth := float(VisualTheme.TILE_DEPTH_EMPTY)

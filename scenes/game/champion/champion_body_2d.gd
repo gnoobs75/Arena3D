@@ -389,6 +389,10 @@ func update_status_effects(champ: ChampionState) -> void:
 	if _status_overlay == null:
 		return
 
+	# Always reset modulate first (prevents stuck invisible state from stealth/hypnotize)
+	if _body_container:
+		_apply_team_tint()
+
 	# Clear existing overlays
 	for child in _status_overlay.get_children():
 		child.queue_free()
@@ -436,16 +440,30 @@ func update_status_effects(champ: ChampionState) -> void:
 		shield.body_height = TOKEN_SIZE * 0.7
 		_status_overlay.add_child(shield)
 
-	# Stealthed - faded/transparent with smoke tint
+	# Stealthed - faded/transparent with wavy position offset
 	if champ.has_buff("stealth"):
 		if _body_container:
-			_body_container.modulate = Color(0.7, 0.7, 0.8, 0.35)
+			_body_container.modulate = Color(0.6, 0.6, 0.75, 0.45)
 		return
 
 	# Power locked - dark red aura
 	if champ.has_debuff("powerLocked"):
 		var locked := _StatusPowerLockedDrawer.new()
 		_status_overlay.add_child(locked)
+
+	# Low HP effects
+	var hp_ratio := float(champ.current_hp) / float(champ.max_hp)
+	if hp_ratio < 0.3 and hp_ratio > 0:
+		var low_hp := _LowHPOverlay.new()
+		low_hp.is_near_death = hp_ratio < 0.2
+		_status_overlay.add_child(low_hp)
+
+	# Buff power glow - scale glow if buffed above base power
+	if _effects and champ.current_power > champ.base_power:
+		var power_boost := float(champ.current_power - champ.base_power)
+		for child in _effects.get_children():
+			if child is _GlowDrawer:
+				(child as _GlowDrawer).glow_radius = 24.0 * (1.0 + power_boost * 0.15)
 
 	# Restore team tint if not overridden
 	_apply_team_tint()
@@ -565,9 +583,9 @@ func _update_champion_idle(t: float, intensity: float) -> void:
 					_left_arm_joint.rotation = pray_angle
 				if _right_arm_joint:
 					_right_arm_joint.rotation = pray_angle
-			# Subtle upward gaze
+			# Subtle upward gaze (rotation to avoid drift)
 			if _head:
-				_head.position.y -= sin(t * 0.4) * 0.3 * intensity
+				_head.rotation = sin(t * 0.4) * 0.04 * intensity
 
 		"DarkWizard":
 			# Eerie slow drift, occasional arm raise
@@ -607,10 +625,13 @@ func _update_champion_idle(t: float, intensity: float) -> void:
 			# Meditative breathing, deeper than normal
 			if _torso:
 				_torso.scale.y = 1.0 + sin(t * 1.5) * 0.03 * intensity
-			# Subtle levitation attempt
-			if _body_container and fmod(t, 6.0) < 1.0:
-				var rise_t := fmod(t, 6.0) / 1.0
-				_body_container.position.y -= sin(rise_t * PI) * 1.5
+			# Subtle levitation - smooth hover using absolute position
+			if _body_container:
+				if fmod(t, 6.0) < 1.0:
+					var rise_t := fmod(t, 6.0) / 1.0
+					_body_container.position.y = -sin(rise_t * PI) * 1.5
+				else:
+					_body_container.position.y = 0.0
 
 		"Confessor":
 			# Graceful sway like dancing in place
@@ -2356,3 +2377,25 @@ class _StatusPowerLockedDrawer extends Node2D:
 			var r := 12.0 + float(i) * 6.0
 			var col := Color(0.6, 0.1, 0.1, 0.2 * pulse * (1.0 - float(i) * 0.3))
 			draw_arc(Vector2.ZERO, r, 0, TAU, 16, col, 1.5)
+
+
+class _LowHPOverlay extends Node2D:
+	"""Low HP red tint flicker and near-death intermittent effects."""
+	var is_near_death: bool = false
+	var _time: float = 0.0
+
+	func _process(delta: float) -> void:
+		_time += delta
+		queue_redraw()
+
+	func _draw() -> void:
+		# Red tint flicker
+		var red_alpha := sin(_time * 8.0) * 0.15
+		if red_alpha > 0:
+			draw_circle(Vector2.ZERO, 20.0, Color(0.8, 0.1, 0.05, red_alpha))
+		# Near-death: pulsing border
+		if is_near_death:
+			var near_pulse := sin(_time * 12.0)
+			if near_pulse > -0.3:
+				var intensity := (near_pulse + 0.3) / 1.3 * 0.3
+				draw_arc(Vector2.ZERO, 22.0, 0, TAU, 16, Color(0.9, 0.1, 0.05, intensity), 1.5)

@@ -5,8 +5,8 @@ class_name DiscardPile
 
 signal pile_clicked(player_id: int)
 
-const CARD_OFFSET := 2  # Pixels between stacked cards
-const MAX_VISIBLE_STACK := 5  # Max cards to show in stack visual
+const CARD_OFFSET := 3  # Pixels between stacked cards
+const MAX_VISIBLE_STACK := 3  # Show top 3 cards face-up
 const PILE_WIDTH := 100
 const PILE_HEIGHT := 140
 
@@ -80,26 +80,22 @@ func _draw_empty_pile() -> void:
 
 
 func _draw_card_stack() -> void:
-	"""Draw stacked cards with top card visible."""
-	var stack_count := mini(discard_cards.size(), MAX_VISIBLE_STACK)
+	"""Draw stacked cards with top 3 face-up."""
+	var total := discard_cards.size()
+	var show_count := mini(total, MAX_VISIBLE_STACK)
 	var center_x := size.x / 2
 	var base_y := 15.0
 
 	var card_w := 60.0
 	var card_h := 80.0
 
-	# Draw stack layers (back cards)
-	for i in range(stack_count - 1):
+	# Draw top N cards face-up, stacked with slight offset
+	for i in range(show_count):
+		var card_idx := total - show_count + i
+		var card_name: String = discard_cards[card_idx]
 		var offset := i * CARD_OFFSET
 		var card_rect := Rect2(center_x - card_w / 2 + offset, base_y + offset, card_w, card_h)
-		_draw_mini_card_back(card_rect)
-
-	# Draw top card (face up)
-	if discard_cards.size() > 0:
-		var top_card_name: String = discard_cards[discard_cards.size() - 1]
-		var offset := (stack_count - 1) * CARD_OFFSET
-		var card_rect := Rect2(center_x - card_w / 2 + offset, base_y + offset, card_w, card_h)
-		_draw_mini_card_front(card_rect, top_card_name)
+		_draw_mini_card_front(card_rect, card_name)
 
 	# Count badge
 	_draw_count_badge()
